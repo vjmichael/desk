@@ -84,7 +84,7 @@ class TelegramTests(unittest.TestCase):
         self.assertNotIn(TOK, r["message"])
 
     def test_malformed_token_is_rejected_before_any_network_call(self):
-        for bad in ("abc", "123456789:short", "123456789:has space inside it_______", "tok…en:1234567890123456789012"):
+        for bad in ("abc", "123456789:short", "123456789:has space inside it_______", "tok\\u2026en:1234567890123456789012"):
             with mock.patch.object(c, "http_json") as m:
                 r = c.telegram_test(bad, "", "Recovery")
                 r2, chat = c.telegram_find_chat(bad, "Recovery")

@@ -3,7 +3,10 @@ import json, os, sys, tempfile, time, unittest
 from datetime import datetime, timedelta, timezone
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "user_data", "strategies"))
-from MajVajFreqAI import allowance, goal_state, ledger, load_money, read_verdict  # noqa: E402
+from MajVajFreqAI import (allowance, event_distances, goal_state, in_event_window, ledger, load_money,  # noqa: E402
+                          point_in_time, read_verdict)
+import numpy as np  # noqa: E402
+import pandas as pd  # noqa: E402
 
 DAY = datetime(2026, 11, 23, 14, 30, tzinfo=timezone.utc)  # London/New York overlap
 
@@ -66,6 +69,25 @@ class VerdictTests(unittest.TestCase):
             json.dump({"verdict": "normal", "expires": now - 1}, open(p, "w"))
             self.assertEqual(read_verdict(p, now)[0], "stand_down")
             self.assertEqual(read_verdict(os.path.join(d, "missing"), now)[0], "stand_down")
+
+
+class CalendarAndDataTests(unittest.TestCase):
+    def test_event_window(self):
+        ev = np.array([10_000.0])
+        self.assertTrue(in_event_window(ev, 10_000 - 59 * 60))     # 59 min before
+        self.assertFalse(in_event_window(ev, 10_000 - 61 * 60))    # 61 min before
+        self.assertTrue(in_event_window(ev, 10_000 + 89 * 60))     # 89 min after
+        self.assertFalse(in_event_window(ev, 10_000 + 91 * 60))
+        self.assertFalse(in_event_window(None, 10_000))            # no calendar: no block (Grok still guards)
+
+    def test_point_in_time_never_uses_future_values(self):
+        table = pd.DataFrame({"available_at": [100.0, 200.0], "value": [1.0, 2.0]})
+        out = point_in_time(np.array([50.0, 100.0, 150.0, 250.0]), table)
+        self.assertTrue(np.isnan(out[0])); self.assertEqual(list(out[1:]), [1.0, 1.0, 2.0])
+
+    def test_event_distances(self):
+        nxt, prv = event_distances(np.array([3600.0 * 10]), np.array([0.0, 3600.0 * 30]))
+        self.assertEqual((nxt[0], prv[0]), (20.0, 10.0))
 
 
 if __name__ == "__main__":

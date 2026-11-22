@@ -145,6 +145,70 @@ class FtApiTests(unittest.TestCase):
         self.assertFalse(api.summary()["ok"])
 
 
+class FakeFt:
+    def __init__(self, state="running"):
+        self.state, self.calls = state, []
+    def summary(self):
+        return {"ok": True, "state": self.state}
+    def pause(self):
+        self.calls.append("pause"); self.state = "paused"
+    def start(self):
+        self.calls.append("start"); self.state = "running"
+    def trades(self, limit=500):
+        return {"trades": []}
+
+
+class ControlTests(unittest.TestCase):
+    def setUp(self):
+        from desk.store import Store
+        self.tmp = tempfile.TemporaryDirectory()
+        d = self.tmp.name
+        os.makedirs(os.path.join(d, "mv"))
+        cfg = {"ft_username": "u", "ft_password": "p", "verdict_file": os.path.join(d, "mv", "verdict.json"),
+               "money_file": os.path.join(d, "mv", "money.json")}
+        json.dump(cfg, open(os.path.join(d, "c.json"), "w"))
+        self.cfg, self.ft, self.notes = cfg, FakeFt(), Notes()
+        self.mv = MV.MajVaj(Store(os.path.join(d, "data")), os.path.join(d, "c.json"), notifier=self.notes, ft=self.ft)
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def test_wrong_phrase_changes_nothing(self):
+        for phrase in ("", "pause", "PAUSE", "RESUME TRADING", None):
+            r = self.mv.set_trading(False, phrase)
+            self.assertFalse(r["ok"])
+        self.assertEqual(self.ft.calls, [])
+        self.assertTrue(self.mv.wanted_trading())
+
+    def test_pause_is_kept_across_bot_restarts(self):
+        self.assertTrue(self.mv.set_trading(False, "pause trading")["ok"])
+        self.assertEqual(self.ft.calls, ["pause"]); self.assertFalse(self.mv.wanted_trading())
+        self.ft.state = "running"                      # Freqtrade restarted: it always starts running
+        self.assertEqual(self.mv.enforce_control(), "paused")
+        self.assertEqual(self.ft.state, "paused")
+        self.assertIsNone(self.mv.enforce_control())   # already right
+        self.assertTrue(self.mv.set_trading(True, "RESUME TRADING")["ok"])
+        self.assertEqual(self.ft.state, "running")
+        self.assertTrue(self.mv.status()["control"]["trading_wanted"])
+
+    def test_never_resumes_during_a_mode_change(self):
+        self.ft.state = "paused"
+        with open(self.mv.mode.request_file, "w") as f:
+            f.write('{"to": "paper"}')
+        self.assertIsNone(self.mv.enforce_control())
+        os.unlink(self.mv.mode.request_file)
+        self.mv.mode.state_file = os.path.join(self.tmp.name, "mode_state.json")
+        with open(self.mv.mode.state_file, "w") as f:
+            f.write('{"mode": "live_exit_only"}')
+        self.assertIsNone(self.mv.enforce_control())
+        self.assertEqual(self.ft.calls, [])
+
+    def test_recovery_bot_pause_is_remembered(self):
+        W.remember_choice(self.cfg, "paused")
+        self.assertFalse(self.mv.wanted_trading())
+        self.assertEqual(self.mv.enforce_control(), "paused")
+
+
 class WatchdogTests(unittest.TestCase):
     OK = {"ft_ok": True, "ft_age_min": 1, "desk_ok": True, "verdict_left_min": 60, "disk_pct": 40}
 

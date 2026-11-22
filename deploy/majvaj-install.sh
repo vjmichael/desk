@@ -60,7 +60,8 @@ fi
 if [ -n "${HEARTBEAT_URL:-}" ]; then
   python3 -c "import json,sys; c=json.load(open('$CFG')); c['heartbeat_url']=sys.argv[1]; json.dump(c,open('$CFG','w'),indent=2)" "$HEARTBEAT_URL"
 fi
-chown -R 1000:1000 "$UD"; chmod 600 "$UD/config.private.json"
+[ -f "$UD/config.mode.json" ] || echo '{"dry_run": true, "db_url": "sqlite:////freqtrade/user_data/tradesv3.dryrun.sqlite"}' > "$UD/config.mode.json"
+chown -R 1000:1000 "$UD"; chmod 600 "$UD/config.private.json" "$UD/config.mode.json"
 chown desk:1000 "$MV"; chmod 755 "$MV"
 chown root:desk "$CFG"; chmod 640 "$CFG"
 
@@ -87,7 +88,7 @@ python3 -c "import json,sys; p=sys.argv[1]; c=json.load(open(p)); c['freqai']['m
 echo "   bot limits: $CPUS CPUs, $MEM memory, $JOBS training threads"
 cat > /etc/systemd/system/majvaj-freqtrade.service <<UNIT
 [Unit]
-Description=Maj Vaj trading bot (Freqtrade + FreqAI, dry-run)
+Description=Maj Vaj trading bot (Freqtrade + FreqAI; paper unless switched live from the Desk page)
 Requires=docker.service
 After=docker.service network-online.target desk.service
 Wants=network-online.target
@@ -99,8 +100,7 @@ ExecStartPre=-/usr/bin/docker rm -f majvaj-ft
 ExecStart=/usr/bin/docker run --rm --name majvaj-ft --memory $MEM --cpus $CPUS -p 127.0.0.1:8080:8080 \\
   -v $UD:/freqtrade/user_data $DIGEST trade \\
   --config /freqtrade/user_data/config-4h.json --config /freqtrade/user_data/config.private.json \\
-  --strategy MajVajFreqAI4h --freqaimodel LightGBMRegressor \\
-  --db-url sqlite:////freqtrade/user_data/tradesv3.dryrun.sqlite
+  --config /freqtrade/user_data/config.mode.json --strategy MajVajFreqAI4h --freqaimodel LightGBMRegressor
 ExecStop=/usr/bin/docker stop -t 60 majvaj-ft
 Restart=always
 RestartSec=30
@@ -144,3 +144,5 @@ echo
 echo "Done. The bot is training its model on startup (several minutes) and needs a fresh Grok verdict"
 echo "before it may open trades. Watch it on the Desk page -> 'Maj Vaj trading bot'."
 echo "Update later by running this same script again."
+echo "Live trading stays locked until its readiness checks pass. To prepare it later (as root):"
+echo "  python3 -m desk.livemode set-passphrase    and    python3 -m desk.livemode set-trade-key   (run in /opt/desk)"

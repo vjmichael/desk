@@ -19,15 +19,24 @@ Money rules (the Maj Vaj financial design, TB-FIN-01), applied in every mode inc
   extra trades only in chosen sessions, one at a time, smaller, with a stronger signal and a NORMAL
   verdict, sized so a loss can never take back more than a set share of the day's profit.
 - Daily loss limit: no new entries after losing a set share of the day's starting bankroll.
-Settings live in majvaj/money.json (written from the Desk page). Open trades are always managed."""
+Settings live in majvaj/money.json (written from the Desk page). Open trades are always managed.
+
+Economic calendar gate (all modes, backtests included, because these dates are published in advance):
+no new entries from 60 minutes before to 90 minutes after an FOMC decision or a CPI, jobs or PPI release.
+Outside data features (point-in-time): Crypto Fear & Greed level and 7-day change, hours to the next and
+since the last high-impact event, and (when a FRED key is set) CPI year-on-year, unemployment and the
+fed funds rate as first published. A value is used only after the moment it became public."""
 import json
 import logging
+import os
 import time
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 from functools import reduce
 
 import talib.abstract as ta
+import numpy as np
+import pandas as pd
 from pandas import DataFrame
 from technical import qtpylib
 
@@ -48,6 +57,71 @@ SESSIONS = ((0, 7, "Asia/Tokyo"), (7, 13, "London"), (13, 16, "London/New York o
             (16, 21, "New York"), (21, 24, "Quiet (late US)"))
 OPPORTUNITY_SIGNAL_FACTOR = 1.5   # after the goal, the model must be 50% more convinced
 ROUND_TRIP_COST = 0.0052
+EVENTS_FILE = "/freqtrade/user_data/majvaj/events.json"
+SERIES_FILE = "/freqtrade/user_data/majvaj/series.csv"
+EVENT_BEFORE_MIN, EVENT_AFTER_MIN = 60, 90
+_cache = {}
+
+
+def _cached(path, loader):
+    """Re-read a data file only when it changes on disk."""
+    try:
+        mtime = os.path.getmtime(path)
+    except OSError:
+        return None
+    hit = _cache.get(path)
+    if hit and hit[0] == mtime:
+        return hit[1]
+    try:
+        value = loader(path)
+    except Exception:
+        logger.warning("Maj Vaj: could not read %s", path)
+        return None
+    _cache[path] = (mtime, value)
+    return value
+
+
+def load_events(path):
+    """Sorted numpy array of event times (unix seconds), or None if there is no calendar."""
+    def read(p):
+        with open(p, "r", encoding="utf-8") as f:
+            ev = json.load(f).get("events") or []
+        return np.array(sorted(float(e["at"]) for e in ev if isinstance(e, dict) and "at" in e))
+    return _cached(path, read)
+
+
+def in_event_window(events, now_ts, before_min=EVENT_BEFORE_MIN, after_min=EVENT_AFTER_MIN):
+    if events is None or not len(events):
+        return False
+    i = np.searchsorted(events, now_ts - after_min * 60)
+    return i < len(events) and events[i] <= now_ts + before_min * 60
+
+
+def load_series(path):
+    def read(p):
+        df = pd.read_csv(p)
+        return {k: g.sort_values("available_at")[["available_at", "value"]].reset_index(drop=True)
+                for k, g in df.groupby("series")}
+    return _cached(path, read)
+
+
+def point_in_time(close_ts, table):
+    """For each candle close time, the latest value already public at that time (NaN before the first)."""
+    if table is None or table.empty:
+        return np.full(len(close_ts), np.nan)
+    idx = np.searchsorted(table["available_at"].to_numpy(), close_ts, side="right") - 1
+    vals = table["value"].to_numpy()
+    out = np.where(idx >= 0, vals[np.clip(idx, 0, None)], np.nan)
+    return out
+
+
+def event_distances(close_ts, events, cap_hours=168.0):
+    if events is None or not len(events):
+        return np.full(len(close_ts), cap_hours), np.full(len(close_ts), cap_hours)
+    j = np.searchsorted(events, close_ts, side="right")
+    nxt = np.where(j < len(events), (events[np.clip(j, 0, len(events) - 1)] - close_ts) / 3600, cap_hours)
+    prv = np.where(j > 0, (close_ts - events[np.clip(j - 1, 0, None)]) / 3600, cap_hours)
+    return np.minimum(nxt, cap_hours), np.minimum(prv, cap_hours)
 
 
 def session_name(dt_utc):
@@ -193,7 +267,31 @@ class MajVajFreqAI(IStrategy):
     def feature_engineering_standard(self, dataframe: DataFrame, metadata: dict, **kwargs) -> DataFrame:
         dataframe["%-day_of_week"] = dataframe["date"].dt.dayofweek
         dataframe["%-hour_of_day"] = dataframe["date"].dt.hour
+        if not self.config.get("majvaj_external_features", True):
+            return dataframe
+        # a candle's information is complete at its close, so outside data is matched to the close time
+        close_ts = ((dataframe["date"] - pd.Timestamp("1970-01-01", tz="UTC")).dt.total_seconds()
+                    + self._tf_seconds()).to_numpy().astype(float)
+        series = load_series(self.config.get("majvaj_series_file", SERIES_FILE)) or {}
+        fng = point_in_time(close_ts, series.get("fear_greed"))
+        dataframe["%-fear_greed"] = pd.Series(fng).ffill().fillna(50.0).to_numpy()
+        dataframe["%-fear_greed_chg7d"] = pd.Series(dataframe["%-fear_greed"].to_numpy()).diff(
+            int(7 * 86400 / self._tf_seconds())).fillna(0.0).to_numpy()
+        nxt, prv = event_distances(close_ts, load_events(self.config.get("majvaj_events_file", EVENTS_FILE)))
+        dataframe["%-hours_to_event"] = nxt
+        dataframe["%-hours_since_event"] = prv
+        # Macro features change the model's inputs, so they are an explicit setting, never switched on by data
+        # appearing mid-run (a trained model fed different columns fails until it retrains). To turn them on, set
+        # "majvaj_macro_features": true AND change freqai.identifier so a fresh model is trained.
+        if self.config.get("majvaj_macro_features"):
+            for name in ("unemployment_rate", "fed_funds_rate", "cpi_yoy"):
+                v = point_in_time(close_ts, series.get(name))
+                dataframe["%-" + name] = pd.Series(v).ffill().fillna(0.0).to_numpy()
         return dataframe
+
+    def _tf_seconds(self):
+        unit = {"m": 60, "h": 3600, "d": 86400}[self.timeframe[-1]]
+        return int(self.timeframe[:-1]) * unit
 
     def set_freqai_targets(self, dataframe: DataFrame, metadata: dict, **kwargs) -> DataFrame:
         n = self.freqai_info["feature_parameters"]["label_period_candles"]
@@ -230,6 +328,10 @@ class MajVajFreqAI(IStrategy):
             return False
 
     def _confirm(self, pair, current_time):
+        events = load_events(self.config.get("majvaj_events_file", EVENTS_FILE))
+        if in_event_window(events, current_time.timestamp()):
+            logger.info("Maj Vaj calendar: no entry on %s, inside a high-impact event window", pair)
+            return False
         if self._opportunity_mode(current_time):
             if not self._strong_signal(pair):
                 logger.info("Maj Vaj: goal reached, %s signal not strong enough for an extra trade", pair)
