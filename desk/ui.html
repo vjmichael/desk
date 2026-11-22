@@ -1,76 +1,110 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Desk: connections</title>
+<title>Desk: keys</title>
 <style>
- body{font:16px/1.5 system-ui,sans-serif;max-width:760px;margin:24px auto;padding:0 16px;color:#222}
- h1{font-size:22px} h2{font-size:17px;margin:0 0 4px}
+ body{font:16px/1.5 system-ui,sans-serif;max-width:820px;margin:24px auto;padding:0 16px;color:#222}
+ h1{font-size:22px} h2{font-size:17px;margin:0 0 2px}
  .card{border:1px solid #ccc;border-radius:8px;padding:14px 16px;margin:14px 0}
- label{display:block;margin:8px 0 2px;font-size:14px;color:#444}
- input{width:100%;box-sizing:border-box;padding:8px;font:inherit;border:1px solid #aaa;border-radius:6px}
- button{padding:8px 14px;margin:10px 8px 0 0;font:inherit;border:1px solid #666;border-radius:6px;background:#f4f4f4;cursor:pointer}
- .saved{font-size:13px;color:#2a7a2a} .notsaved{font-size:13px;color:#a05a00}
+ .sub{font-size:13px;color:#666;margin:0 0 8px}
+ label{display:block;margin:6px 0 2px;font-size:14px;color:#444}
+ input{width:100%;box-sizing:border-box;padding:7px;font:inherit;border:1px solid #aaa;border-radius:6px}
+ button{padding:6px 12px;margin:6px 6px 0 0;font:inherit;font-size:14px;border:1px solid #666;border-radius:6px;background:#f4f4f4;cursor:pointer}
+ table{width:100%;border-collapse:collapse;font-size:14px;margin-top:4px}
+ th,td{text-align:left;padding:6px 4px;border-bottom:1px solid #e3e3e3;vertical-align:middle}
+ td button{margin:0 4px 0 0;padding:3px 9px;font-size:13px}
+ .use{color:#0a7d33;font-weight:600} .mut{color:#777;font-size:13px}
+ .del{border-color:#b3261e;color:#b3261e} .del.armed{background:#b3261e;color:#fff}
  .res{margin-top:8px;font-size:14px;padding:8px;border-radius:6px;display:none}
  .ok{background:#e6f4e6;display:block} .bad{background:#fbe9e7;display:block}
- .note{font-size:14px;color:#555}
+ .note{font-size:14px;color:#555} .form{border-top:1px dashed #ccc;margin-top:10px;padding-top:6px;display:none}
 </style></head><body>
-<h1>Desk: connections <small id="ver" style="font-size:13px;color:#777;font-weight:normal"></small></h1>
-<p class="note">Keys are stored only in this computer's <code>data</code> folder and are never shown again or sent anywhere except to the service they belong to. Leave a field empty to keep what is already saved.
-Paper trading needs no trading permission: create the Kraken key with <b>Query funds only</b> and <b>no withdrawals</b>.</p>
+<h1>Desk: keys <small id="ver" style="font-size:13px;color:#777;font-weight:normal"></small></h1>
+<p class="note"><b>Write-only key store.</b> Each service keeps a list of labeled keys; one is <b>in use</b>. Once saved, a key can never be shown again, here or anywhere: the page only knows its label, when it was saved, and which parts are filled in.
+You can add keys, rename them, replace their values, switch which one is in use, test them, and delete them (asks twice). Keys stay in this server's private <code>data</code> folder and are only sent to the service they belong to.</p>
 <p><a id="mvlink" href="#">Maj Vaj trading bot &rarr;</a> &nbsp; <a id="paperlink" href="#" style="font-size:13px;color:#777">old Desk paper engine (retired)</a></p>
 <div id="app"></div>
 <script>
 const TOKEN=new URLSearchParams(location.search).get('t')||'';
-const SECTIONS=[
- {id:'kraken',title:'Kraken',fields:[['kraken_key','API key'],['kraken_secret','API secret']],
-  tests:[['kraken_public','Test public data'],['kraken_private','Test my key']]},
- {id:'ktrade',title:'Kraken trade key (only for LIVE trading) - permissions: Query Funds, Query Open/Closed Orders &amp; Trades, Create &amp; Modify Orders, Cancel/Close Orders. NEVER Withdraw.',fields:[['kraken_trade_key','API key'],['kraken_trade_secret','API secret']],
-  tests:[['kraken_trade','Test trade key']]},
- {id:'grok',title:'Grok (xAI)',fields:[['grok_key','API key']],tests:[['grok','Test key']]},
- {id:'fred',title:'FRED (St. Louis Fed) - optional, free: macro data and CPI / jobs release calendar',fields:[['fred_key','API key']],tests:[['fred','Test key']]},
- {id:'tgd',title:'Telegram: Desk bot (reports)',fields:[['telegram_desk_token','Bot token'],['telegram_desk_chat_id','Your chat ID (optional, found automatically)']],
-  tests:[['telegram_desk','Test bot']],find:'desk'},
- {id:'tgr',title:'Telegram: Recovery bot (alerts)',fields:[['telegram_recovery_token','Bot token'],['telegram_recovery_chat_id','Your chat ID (optional, found automatically)']],
-  tests:[['telegram_recovery','Test bot']],find:'recovery'}];
+const SERVICES=[
+ {id:'kraken',title:'Kraken (read-only, for paper)',sub:'Permissions: Query Funds only. No trading, no withdrawals.',
+  fields:[['kraken_key','API key'],['kraken_secret','API secret']],extra:[['kraken_public','Test public data']]},
+ {id:'kraken_trade',title:'Kraken trade key (only for LIVE trading)',sub:'Permissions: Query Funds, Query Open/Closed Orders & Trades, Create & Modify Orders, Cancel/Close Orders. NEVER Withdraw. Best: restrict it to this server\'s IP.',
+  fields:[['kraken_trade_key','API key'],['kraken_trade_secret','API secret']]},
+ {id:'grok',title:'Grok (xAI)',sub:'Fundamentals research (news, X).',fields:[['grok_key','API key']]},
+ {id:'fred',title:'FRED (St. Louis Fed)',sub:'Optional, free: macro data and the CPI / jobs / PPI release calendar.',fields:[['fred_key','API key']]},
+ {id:'telegram_desk',title:'Telegram: Desk bot (reports)',sub:'After adding, message the bot in Telegram, then press Find chat ID.',
+  fields:[['telegram_desk_token','Bot token'],['telegram_desk_chat_id','Chat ID (optional, found automatically)']],chat:true},
+ {id:'telegram_recovery',title:'Telegram: Recovery bot (alerts)',sub:'After adding, message the bot in Telegram, then press Find chat ID.',
+  fields:[['telegram_recovery_token','Bot token'],['telegram_recovery_chat_id','Chat ID (optional, found automatically)']],chat:true}];
+const $=id=>document.getElementById(id);
+const esc=s=>String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 async function api(path,body){
   const ctl=new AbortController();const timer=setTimeout(()=>ctl.abort(),60000);
   try{
     const r=await fetch('/api/'+path,{method:body?'POST':'GET',headers:{'X-Desk-Token':TOKEN,'Content-Type':'application/json'},body:body?JSON.stringify(body):undefined,signal:ctl.signal});
     return await r.json();
-  }catch(e){
-    return {ok:false,message:e.name==='AbortError'?'No answer after 60 seconds. Check the terminal window for an error message.':'The app did not answer. Is the terminal window still running it? Look there for an error message.'};
-  }finally{clearTimeout(timer);}
+  }catch(e){return {ok:false,message:e.name==='AbortError'?'No answer after 60 seconds.':'Desk did not answer.'};}
+  finally{clearTimeout(timer);}
 }
-function show(id,res){const e=document.getElementById('res-'+id);e.textContent=res.message||res.error||'No answer';e.className='res '+(res.ok?'ok':'bad');}
-async function refresh(){
-  const st=await api('status');
-  if(!st.saved)return;
-  document.getElementById('ver').textContent='version '+(st.version||'unknown');
-  for(const s of SECTIONS)for(const [f] of s.fields){
-    const e=document.getElementById('st-'+f);
-    e.textContent=st.saved[f]?'saved':'not saved';e.className=st.saved[f]?'saved':'notsaved';}
+function show(svc,res){const e=$('res-'+svc);e.textContent=res.message||res.error||'No answer';e.className='res '+(res.ok?'ok':'bad');}
+let KEYS={};const armed={};
+function formHtml(svc,mode){  // mode: add | edit
+  return '<label>Label<input id="f-'+svc.id+'-label" autocomplete="off" placeholder="e.g. Main account"></label>'+
+    svc.fields.map(([f,l])=>'<label>'+esc(l)+(mode==='edit'?' (leave empty to keep)':'')+'<input id="f-'+svc.id+'-'+f+'" type="password" autocomplete="off" placeholder="paste here"></label>').join('')+
+    '<button data-a="'+mode+'-save">'+(mode==='add'?'Save new key':'Save changes')+'</button><button data-a="cancel">Cancel</button>';
 }
-async function save(sec){
-  const v={};for(const [f] of sec.fields){const i=document.getElementById('in-'+f);if(i.value.trim()){v[f]=i.value.trim();}}
-  if(!Object.keys(v).length){show(sec.id,{ok:false,message:'Nothing to save: all fields are empty.'});return;}
-  const r=await api('save',{values:v});
-  for(const [f] of sec.fields)document.getElementById('in-'+f).value='';
-  show(sec.id,{ok:r.ok,message:r.ok?'Saved. Now press a Test button.':(r.error||'Save failed')});refresh();
+function openForm(svc,mode,id){
+  const f=$('form-'+svc.id);f.dataset.mode=mode;f.dataset.id=id||'';f.innerHTML=formHtml(svc,mode);f.style.display='block';
+  if(mode==='edit'){const k=(KEYS[svc.id]||[]).find(x=>x.id===id);$('f-'+svc.id+'-label').value=k?k.label:'';}
+  $('f-'+svc.id+'-label').focus();
 }
-async function test(sec,name){show(sec.id,{ok:true,message:'Testing...'});show(sec.id,await api('test/'+name,{}));}
-async function find(sec){const r=await api('find_chat/'+sec.find,{});show(sec.id,r);refresh();}
-document.getElementById('paperlink').href='/paper?t='+encodeURIComponent(TOKEN);
-document.getElementById('mvlink').href='/majvaj?t='+encodeURIComponent(TOKEN);
-document.getElementById('app').innerHTML='';
-for(const sec of SECTIONS){
+function closeForm(svc){const f=$('form-'+svc.id);f.style.display='none';f.innerHTML='';}
+function render(){
+  for(const svc of SERVICES){
+    const list=KEYS[svc.id]||[];
+    $('list-'+svc.id).innerHTML=list.length?'<table><tr><th>Label</th><th>Saved</th><th>Status</th><th></th></tr>'+list.map(k=>
+      '<tr><td>'+esc(k.label)+(Object.entries(k.filled).every(([f,v])=>v||f.endsWith('_chat_id'))?'':' <span class="mut">(incomplete)</span>')+(svc.chat&&!k.filled[svc.id+'_chat_id']?' <span class="mut">(no chat ID yet)</span>':'')+'</td>'+
+      '<td class="mut">'+(k.saved_at?new Date(k.saved_at*1000).toLocaleString():'-')+'</td>'+
+      '<td>'+(k.active?'<span class="use">in use</span>':'<button data-a="use" data-id="'+k.id+'">Use</button>')+'</td>'+
+      '<td><button data-a="test" data-id="'+k.id+'">Test</button>'+(svc.chat?'<button data-a="chat" data-id="'+k.id+'">Find chat ID</button>':'')+
+      '<button data-a="edit" data-id="'+k.id+'">Rename / replace</button><button data-a="del" class="del" data-id="'+k.id+'">Delete</button></td></tr>').join('')+'</table>'
+      :'<p class="mut">No keys saved.</p>';
+  }
+}
+async function load(){
+  const r=await api('keys');if(!r.ok){return;}KEYS=r.services;render();
+  const st=await api('status');if(st.version)$('ver').textContent='version '+st.version;
+}
+async function act(svc,a,btn){
+  const id=btn.dataset.id;
+  if(a==='add'){openForm(svc,'add');return;}
+  if(a==='cancel'){closeForm(svc);return;}
+  if(a==='edit'){openForm(svc,'edit',id);return;}
+  if(a==='add-save'||a==='edit-save'){
+    const vals={};for(const [f] of svc.fields){const v=$('f-'+svc.id+'-'+f).value.trim();if(v)vals[f]=v;}
+    const label=$('f-'+svc.id+'-label').value;
+    const r=a==='add-save'?await api('keys/add',{service:svc.id,label:label,values:vals})
+                          :await api('keys/edit',{id:$('form-'+svc.id).dataset.id,label:label,values:vals});
+    show(svc.id,r);if(r.ok)closeForm(svc);load();return;}
+  if(a==='del'){
+    if(!armed[id]){armed[id]=setTimeout(()=>{armed[id]=0;btn.classList.remove('armed');btn.textContent='Delete';},5000);
+      btn.classList.add('armed');btn.textContent='Click again to delete';return;}
+    clearTimeout(armed[id]);armed[id]=0;show(svc.id,await api('keys/delete',{id:id}));load();return;}
+  if(a==='use'){show(svc.id,await api('keys/use',{id:id}));load();return;}
+  if(a==='test'){show(svc.id,{ok:true,message:'Testing...'});show(svc.id,await api('keys/test',{id:id}));return;}
+  if(a==='chat'){show(svc.id,await api('keys/find_chat',{id:id}));load();return;}
+  if(a==='extra'){show(svc.id,{ok:true,message:'Testing...'});show(svc.id,await api('test/'+btn.dataset.n,{}));return;}
+}
+$('paperlink').href='/paper?t='+encodeURIComponent(TOKEN);
+$('mvlink').href='/majvaj?t='+encodeURIComponent(TOKEN);
+for(const svc of SERVICES){
   const d=document.createElement('div');d.className='card';
-  d.innerHTML='<h2>'+sec.title+'</h2>'+sec.fields.map(([f,l])=>
-   '<label for="in-'+f+'">'+l+' <span id="st-'+f+'"></span></label><input id="in-'+f+'" type="password" autocomplete="off" placeholder="paste here">').join('')+
-   '<div><button data-a="save">Save</button>'+sec.tests.map(([n,l])=>'<button data-a="test" data-n="'+n+'">'+l+'</button>').join('')+
-   (sec.find?'<button data-a="find">Find chat ID</button>':'')+'</div><div id="res-'+sec.id+'" class="res"></div>';
-  d.addEventListener('click',e=>{const a=e.target.dataset.a;if(!a)return;
-    if(a==='save')save(sec);else if(a==='test')test(sec,e.target.dataset.n);else if(a==='find')find(sec);});
-  document.getElementById('app').appendChild(d);
+  d.innerHTML='<h2>'+esc(svc.title)+'</h2><p class="sub">'+esc(svc.sub)+'</p><div id="list-'+svc.id+'"></div>'+
+    '<button data-a="add">+ Add key</button>'+(svc.extra||[]).map(([n,l])=>'<button data-a="extra" data-n="'+n+'">'+esc(l)+'</button>').join('')+
+    '<div class="form" id="form-'+svc.id+'"></div><div id="res-'+svc.id+'" class="res"></div>';
+  d.addEventListener('click',e=>{const b=e.target.closest('button');if(b&&b.dataset.a)act(svc,b.dataset.a,b);});
+  $('app').appendChild(d);
 }
-refresh();
+load();
 </script></body></html>

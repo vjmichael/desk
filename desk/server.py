@@ -52,6 +52,54 @@ class DeskServer(ThreadingHTTPServer):
     def port(self):
         return self.server_address[1]
 
+    def live_now(self):
+        mv = self.majvaj
+        return mv is not None and mv.mode.state().get("mode") in ("live", "live_exit_only")
+
+    def key_action(self, action, body):
+        """Key list actions from the Keys page. Never returns a key value."""
+        s = self.store
+        eid = str(body.get("id") or "")
+        if action == "add":
+            return s.add(str(body.get("service") or ""), body.get("label"), body.get("values") or {})
+        svc, active = s.entry(eid)
+        if svc is None:
+            return {"ok": False, "message": "That key no longer exists. Reload the page."}
+        if svc == "kraken_trade" and self.live_now() and (active or action == "use") and action in ("edit", "use", "delete"):
+            return {"ok": False, "message": "The bot is trading live with the trade key in use. Switch back to paper "
+                                            "first (Maj Vaj page), then change it."}
+        if action == "edit":
+            return s.edit(eid, body.get("label"), body.get("values") or {})
+        if action == "use":
+            return s.use(eid)
+        if action == "delete":
+            return s.delete(eid)
+        if action == "test":
+            return self.test_values(*s.find(eid))
+        if action == "find_chat" and svc.startswith("telegram_"):
+            bot = svc[len("telegram_"):]
+            tok, chat, label = TELEGRAM_BOTS[bot]
+            res, chat_id = connectors.telegram_find_chat(s.find(eid)[1].get(tok, ""), label)
+            if chat_id:
+                s.edit(eid, values={chat: chat_id})
+            return res
+        return {"ok": False, "message": "Unknown action."}
+
+    def test_values(self, svc, v):
+        """Run the connection test for one saved key (by its values, server-side only)."""
+        if svc == "kraken":
+            return connectors.kraken_private_test(v.get("kraken_key", ""), v.get("kraken_secret", ""))
+        if svc == "kraken_trade":
+            return connectors.kraken_private_test(v.get("kraken_trade_key", ""), v.get("kraken_trade_secret", ""))
+        if svc == "grok":
+            return connectors.grok_test(v.get("grok_key", ""))
+        if svc == "fred":
+            return connectors.fred_test(v.get("fred_key", ""))
+        if svc and svc.startswith("telegram_"):
+            tok, chat, label = TELEGRAM_BOTS[svc[len("telegram_"):]]
+            return connectors.telegram_test(v.get(tok, ""), v.get(chat, ""), label)
+        return {"ok": False, "message": "Unknown service."}
+
     def run_test(self, name):
         s = self.store
         if name == "kraken_public":
@@ -146,10 +194,15 @@ class Handler(BaseHTTPRequestHandler):
             if not self._authorized():
                 return self._send(403, {"ok": False, "error": "bad token"})
             return self._send(200, dict(self.server.research.status(), ok=True))
+        if path == "/api/keys":
+            if not self._authorized():
+                return self._send(403, {"ok": False, "error": "bad token"})
+            return self._send(200, {"ok": True, "services": self.server.store.listing()})
         if path == "/api/status":
             if not self._authorized():
                 return self._send(403, {"ok": False, "error": "bad token"})
-            return self._send(200, {"ok": True, "saved": self.server.store.saved(), "version": __version__})
+            st = self.server.store
+            return self._send(200, {"ok": True, "saved": st.saved(), "saved_at": st.saved_at(), "version": __version__})
         self._send(404, {"ok": False, "error": "not found"})
 
     def _post(self):
@@ -168,12 +221,20 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(400, {"ok": False, "error": "bad request"})
         path = self.path.split("?")[0]
         store = self.server.store
+        if path.startswith("/api/keys/"):
+            return self._send(200, self.server.key_action(path[len("/api/keys/"):], body))
         if path == "/api/save":
             vals = body.get("values")
             if not isinstance(vals, dict) or not set(vals) <= set(SECRET_FIELDS):
                 return self._send(400, {"ok": False, "error": "unknown field"})
-            store.update(vals, clear=[c for c in body.get("clear", []) if c in SECRET_FIELDS])
-            return self._send(200, {"ok": True})
+            clear = [c for c in (body.get("clear") or []) if c in SECRET_FIELDS]
+            mv = self.server.majvaj
+            if mv is not None and any(c.startswith("kraken_trade") for c in clear) and \
+                    mv.mode.state().get("mode") in ("live", "live_exit_only"):
+                return self._send(200, {"ok": False, "message": "The bot is trading live with this key. Switch back to "
+                                                                "paper first (Maj Vaj page), then delete it."})
+            store.update(vals, clear=clear)
+            return self._send(200, {"ok": True, "message": "Deleted." if clear and not vals else "Saved."})
         if path in ("/api/history/download", "/api/history/backtest"):
             r = self.server.research
             started = r.download() if path.endswith("download") else r.backtest()
