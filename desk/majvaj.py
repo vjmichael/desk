@@ -190,7 +190,17 @@ class MajVaj:
         except (OSError, ValueError):
             current = None
         return {"bot": bot, "books": books, "money": self.money(), "verdict_file": current,
-                "latest_verdict": latest, "verdicts": self.verdicts.history(limit=25), "now": self.clock()}
+                "latest_verdict": latest, "verdicts": self.verdicts.history(limit=25), "now": self.clock(),
+                "schedule": self.verdicts.schedule_text(), "next_check": self.verdicts.next_check()}
+
+    def save_schedule(self, items):
+        if isinstance(items, str):
+            items = [x for x in items.replace(" ", "").split(",") if x]
+        try:
+            self.verdicts.set_schedule(items)
+        except ValueError as e:
+            return {"ok": False, "message": "Times must be like 00:00, 07:00, 13:30 (UTC, 1 to 8 of them): %s." % e}
+        return {"ok": True, "message": "Grok will check at %s UTC." % ", ".join(self.verdicts.schedule_text())}
 
     # ------------------------------------------------------------ reports
     def evening_report(self, now=None):

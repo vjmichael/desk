@@ -183,6 +183,8 @@ class Handler(BaseHTTPRequestHandler):
             action = path[len("/api/majvaj/"):]
             if action == "money":
                 return self._send(200, mv.save_money(body))
+            if action == "schedule":
+                return self._send(200, mv.save_schedule(body.get("times")))
             if action == "verdict_now":
                 mv.verdicts._meta("last_run", 0)
                 return self._send(200, {"ok": True, "message": "A fundamentals check starts within a minute."})

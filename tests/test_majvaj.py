@@ -75,6 +75,37 @@ class VerdictTests(unittest.TestCase):
         self.assertEqual(len(self.notes.d), 1)
 
 
+class ScheduleTests(unittest.TestCase):
+    def test_times_and_boundaries(self):
+        mins = V.parse_times(["13:30", "0:00", "07:00"])
+        self.assertEqual(mins, [0, 420, 810])
+        day = NOW - NOW % 86400
+        self.assertEqual(V.next_scheduled(day + 3600, mins), day + 420 * 60)          # 01:00 -> 07:00
+        self.assertEqual(V.last_scheduled(day + 3600, mins), day)                     # 01:00 -> 00:00
+        self.assertEqual(V.next_scheduled(day + 15 * 3600, mins), day + 86400)        # 15:00 -> tomorrow 00:00
+        self.assertEqual(V.last_scheduled(day + 60, [810]), day - 86400 + 810 * 60)   # before today's only time
+        for bad in ([], ["25:00"], ["7:61"], ["x"], list("123456789")):
+            with self.assertRaises(ValueError):
+                V.parse_times(bad)
+
+    def test_runs_only_when_a_scheduled_time_has_passed(self):
+        tmp = tempfile.TemporaryDirectory()
+        day = NOW - NOW % 86400
+        clock = [day + 8 * 3600]  # 08:00 UTC
+        s = V.VerdictService(tmp.name, os.path.join(tmp.name, "v.json"), FakeResearch(), lambda: "K", lambda: Settings(),
+                             Notes(), http=lambda *a, **k: chat_reply({"verdict": "normal", "reasons": []}), clock=lambda: clock[0])
+        self.assertTrue(s.due(clock[0]))            # never ran: run now
+        s._meta("last_run", clock[0])
+        self.assertFalse(s.due(clock[0] + 3 * 3600))  # 11:00, nothing scheduled since 08:00
+        self.assertTrue(s.due(day + 13.5 * 3600 + 60))  # 13:31: the New York pre-open check is due
+        self.assertEqual(s.run_once(), "normal")
+        v = json.load(open(os.path.join(tmp.name, "v.json")))
+        self.assertEqual(v["expires"], day + 13.5 * 3600 + V.SLACK)  # valid until the next check + 1 h
+        s.set_schedule(["06:00"])
+        self.assertEqual(s.schedule_text(), ["06:00"])
+        tmp.cleanup()
+
+
 class MoneyAndBooksTests(unittest.TestCase):
     def test_faq_example(self):
         closed = [(i, 100.0) for i in range(5)] + [(10, -20.0)]

@@ -31,7 +31,10 @@ input{width:110px}#msg{min-height:1.3em;margin:6px 0}
 <div class="stat"><b id="today">-</b><span>Today's net</span></div></div></div>
 
 <div class="card"><h2>Fundamentals verdict</h2><div id="verdict" class="big">-</div><div id="vreasons" class="mut"></div>
-<div class="row" style="margin-top:8px"><button id="vnow">Check now</button></div>
+<div class="row" style="margin-top:8px"><button id="vnow">Check now</button>
+<label>Grok checks at (UTC) <input id="v_times" style="width:200px"></label><button id="vsave">Save times</button>
+<span id="vnext" class="mut"></span></div>
+<p class="mut">Grok only runs at these times (plus Check now). Defaults: 00:00 Tokyo open, 07:00 London open, 13:30 New York pre-open / London overlap. Each verdict lasts until the next check plus one hour; if a check fails, the bot stands down when the old verdict runs out.</p>
 <details style="margin-top:8px"><summary>Recent checks</summary><div class="wrap"><table id="vhist"></table></div></details></div>
 
 <div class="card"><h2>Open trades</h2><div class="wrap"><table id="open"></table></div></div>
@@ -93,6 +96,8 @@ async function refresh(){
     $('verdict').textContent=l[0];$('verdict').className='big '+l[1];
     $('vreasons').textContent=(v.reasons||[]).join(' | ')+'  (made '+when(v.made)+', valid until '+when(v.expires)+')';}
   else{$('verdict').textContent='No verdict yet: bot stands down';$('verdict').className='big bad';}
+  $('vnext').textContent='Next check: '+when(s.next_check)+' (your time)';
+  if(!$('v_times').dataset.f){$('v_times').dataset.f=1;$('v_times').value=(s.schedule||[]).join(', ');}
   $('vhist').innerHTML='<tr><th>Time</th><th>Verdict</th><th>Reasons / problem</th></tr>'+(s.verdicts||[]).map(x=>'<tr><td>'+when(x.ts)+'</td><td>'+(x.ok?esc(x.verdict):'<span class="bad">failed</span>')+'</td><td>'+esc(x.ok?JSON.parse(x.reasons||'[]').join(' | '):x.error)+'</td></tr>').join('');
   const op=b.ok?b.open:[];
   $('open').innerHTML='<tr><th>Pair</th><th>Stake</th><th>Entry</th><th>Now</th><th>P/L</th><th>Opened</th></tr>'+(op.length?op.map(t=>'<tr><td>'+esc(t.pair)+'</td><td>'+money(t.stake)+'</td><td>'+esc(t.open_rate)+'</td><td>'+esc(t.current_rate)+'</td><td class="'+((t.profit_abs||0)>=0?'ok':'bad')+'">'+money(t.profit_abs)+' ('+(t.profit_pct??0)+'%)</td><td>'+esc(t.open_date)+'</td></tr>').join(''):'<tr><td colspan="6" class="mut">None</td></tr>');
@@ -103,6 +108,7 @@ async function refresh(){
 $('msave').onclick=async()=>{say(await api('money',{bankroll:$('m_bank').value,daily_loss_limit_pct:$('m_loss').value,daily_goal_usd:$('m_goal').value,
   goal_mode:$('m_mode').value,goal_reduce_pct:$('m_red').value,goal_keep_pct:$('m_keep').value,timezone:$('m_tz').value.trim(),
   goal_sessions:[...document.querySelectorAll('.m_s')].filter(c=>c.checked).map(c=>c.value)}));refresh();};
+$('vsave').onclick=async()=>{say(await api('schedule',{times:$('v_times').value}));refresh();};
 $('vnow').onclick=async()=>say(await api('verdict_now',{}));
 $('rev').onclick=async()=>{const r=await api('report_now',{kind:'evening'});say(r);$('rtext').textContent=r.text||'';};
 $('rwk').onclick=async()=>{const r=await api('report_now',{kind:'weekly'});say(r);$('rtext').textContent=r.text||'';};
