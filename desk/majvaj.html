@@ -34,8 +34,8 @@ dialog::backdrop{background:rgba(0,0,0,.5)}
 <div class="card"><h2>Bot</h2><div id="bot" class="mut">-</div>
 <div class="row" style="margin-top:10px"><span class="switch" id="modeswitch"><span class="track" id="track"><span class="knob"></span></span><span id="modelabel">Paper trading</span></span>
 <span id="modestate" class="mut"></span></div>
-<details style="margin-top:8px"><summary>Live readiness checks</summary><ul id="ready" class="mut"></ul>
-<p class="mut">Live trading stays locked until every check passes. The approval passphrase and the trade-enabled Kraken key are set only from the server console (python3 -m desk.livemode set-passphrase / set-trade-key), never from this page.</p></details></div>
+<details style="margin-top:8px"><summary>Before going live (advice)</summary><ul id="ready" class="mut"></ul>
+<p class="mut">These are recommendations, not a lock: the decision is yours. Live needs only a trade-enabled Kraken key saved on the Keys page, the warning acknowledged and the typed phrase. Real orders use your real Kraken balance, capped by the bankroll in Money rules.</p></details></div>
 
 <div class="card"><h2>Trading on / off</h2>
 <div class="row"><span class="switch" id="sw_trade"><span class="track" id="trk_trade"><span class="knob"></span></span><span id="sw_trade_txt">-</span></span></div>
@@ -45,7 +45,6 @@ dialog::backdrop{background:rgba(0,0,0,.5)}
 
 <dialog id="dlg"><h2 id="dtitle"></h2><div class="warnbox" id="dwarn"></div><div id="dscope" class="mut"></div><ul id="dready" class="mut"></ul>
 <p><label>Type <b id="dphrase"></b> to confirm<br><input id="dtyped" style="width:100%" autocomplete="off"></label></p>
-<p id="dpassrow"><label>Approval passphrase<br><input id="dpass" type="password" style="width:100%" autocomplete="off"></label></p>
 <p><label><input type="checkbox" id="dack" style="width:auto"> I have read this warning (<span id="dver"></span>)</label></p>
 <div class="row"><button id="dcancel" autofocus>Cancel</button><button id="dok"></button></div><div id="dmsg" class="bad"></div></dialog>
 
@@ -115,13 +114,14 @@ function ask(){
 }
 function openDialog(){
   if(!lastMode)return;const toLive=lastMode.state.mode==='paper';
-  if(toLive&&lastMode.locked){say({ok:false,message:'Live trading is locked: open "Live readiness checks" to see what is missing.'});return;}
+  if(toLive&&lastMode.locked){say({ok:false,message:'Not switched: '+lastMode.blockers.join(' ')});return;}
   $('dtitle').textContent=toLive?'Enable live trading?':'Return to paper trading?';
   $('dwarn').textContent=toLive?lastMode.warning_off:lastMode.warning_on;$('dver').textContent=lastMode.warning_version;
-  $('dphrase').textContent=toLive?lastMode.phrase_live:lastMode.phrase_paper;$('dpassrow').style.display=toLive?'':'none';
-  $('dready').innerHTML=toLive?lastMode.checks.map(c=>'<li>'+(c.ok?'✓ ':'✗ ')+esc(c.name)+'</li>').join(''):'';
+  $('dphrase').textContent=toLive?lastMode.phrase_live:lastMode.phrase_paper;
+  $('dscope').innerHTML=toLive?'<b>Real money, within: bankroll '+money(lastMode.scope.bankroll)+' USD, daily loss limit '+esc(lastMode.scope.daily_loss_limit_pct)+'%.</b> Change these in Money rules first if they are not right.':'';
+  $('dready').innerHTML=toLive?lastMode.checks.map(c=>'<li class="'+(c.ok?'ok':'warn')+'">'+(c.ok?'✓ ':'not yet: ')+esc(c.name)+' ('+esc(c.detail)+')</li>').join(''):'';
   $('dok').textContent=toLive?'Review done: enable live trading':'Confirm return to paper';
-  $('dtyped').value='';$('dpass').value='';$('dack').checked=false;$('dmsg').textContent='';$('dlg').dataset.to=toLive?'live':'paper';
+  $('dtyped').value='';$('dack').checked=false;$('dmsg').textContent='';$('dlg').dataset.to=toLive?'live':'paper';
   $('dlg').showModal();$('dcancel').focus();
 }
 async function refresh(){
@@ -143,7 +143,7 @@ async function refresh(){
   const md=s.mode;
   if(md){const paper=(md.state.mode==='paper');$('track').className='track'+(paper?' on':'');
     $('modelabel').textContent=paper?'Paper trading: ON':(md.state.mode==='live'?'Paper trading: OFF (LIVE, real money)':'Returning to paper (live-exit-only)');
-    $('modestate').textContent=(md.locked?'Live is locked':'Live is unlocked')+(md.state.since?' · mode since '+when(md.state.since):'');
+    $('modestate').textContent=(md.locked?'Live needs: '+md.blockers.join(' '):'Click the switch to change mode')+(md.state.since?' · mode since '+when(md.state.since):'');
     $('ready').innerHTML=md.checks.map(c=>'<li class="'+(c.ok?'ok':'bad')+'">'+(c.ok?'✓ ':'✗ ')+esc(c.name)+' — '+esc(c.detail)+'</li>').join('');
     lastMode=md;}
   const dt=s.data;
@@ -172,7 +172,7 @@ $('msave').onclick=async()=>{say(await api('money',{bankroll:$('m_bank').value,d
   goal_sessions:[...document.querySelectorAll('.m_s')].filter(c=>c.checked).map(c=>c.value)}));refresh();};
 $('modeswitch').onclick=openDialog;
 $('dcancel').onclick=()=>$('dlg').close();
-$('dok').onclick=async()=>{const r=await api('mode',{to:$('dlg').dataset.to,phrase:$('dtyped').value,passphrase:$('dpass').value,ack:$('dack').checked});
+$('dok').onclick=async()=>{const r=await api('mode',{to:$('dlg').dataset.to,phrase:$('dtyped').value,ack:$('dack').checked});
   if(r.ok){$('dlg').close();say(r);refresh();}else{$('dmsg').textContent=r.message||'Refused.';}};
 $('drefresh').onclick=async()=>say(await api('data_refresh',{}));
 $('vsave').onclick=async()=>{say(await api('schedule',{times:$('v_times').value}));refresh();};

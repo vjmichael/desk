@@ -24,6 +24,8 @@ const TOKEN=new URLSearchParams(location.search).get('t')||'';
 const SECTIONS=[
  {id:'kraken',title:'Kraken',fields:[['kraken_key','API key'],['kraken_secret','API secret']],
   tests:[['kraken_public','Test public data'],['kraken_private','Test my key']]},
+ {id:'ktrade',title:'Kraken trade key (only for LIVE trading) - permissions: Query Funds, Query Open/Closed Orders &amp; Trades, Create &amp; Modify Orders, Cancel/Close Orders. NEVER Withdraw.',fields:[['kraken_trade_key','API key'],['kraken_trade_secret','API secret']],
+  tests:[['kraken_trade','Test trade key']]},
  {id:'grok',title:'Grok (xAI)',fields:[['grok_key','API key']],tests:[['grok','Test key']]},
  {id:'fred',title:'FRED (St. Louis Fed) - optional, free: macro data and CPI / jobs release calendar',fields:[['fred_key','API key']],tests:[['fred','Test key']]},
  {id:'tgd',title:'Telegram: Desk bot (reports)',fields:[['telegram_desk_token','Bot token'],['telegram_desk_chat_id','Your chat ID (optional, found automatically)']],
