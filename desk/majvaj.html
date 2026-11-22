@@ -17,12 +17,37 @@ input,select{font:inherit;padding:5px 7px;border:1px solid var(--line);border-ra
 input{width:110px}#msg{min-height:1.3em;margin:6px 0}
 .badge{display:inline-block;padding:1px 8px;border-radius:10px;font-size:12px;border:1px solid var(--line)}
 .big{font-size:18px;font-weight:600}
+.switch{display:inline-flex;align-items:center;gap:10px;cursor:pointer;font-weight:600}
+.track{width:52px;height:28px;border-radius:14px;background:#b3261e;position:relative;transition:.2s}
+.track.on{background:#0a7d33}.knob{width:22px;height:22px;border-radius:50%;background:#fff;position:absolute;top:3px;left:3px;transition:.2s}
+.track.on .knob{left:27px}
+dialog{max-width:640px;border:1px solid var(--line);border-radius:10px;background:var(--card);color:var(--fg)}
+dialog::backdrop{background:rgba(0,0,0,.5)}
+.confirm{border:2px solid var(--warn);border-radius:8px;padding:10px 12px;margin-top:8px;display:none}
+.confirm input{width:240px;text-transform:uppercase}
+.warnbox{border-left:4px solid var(--bad);padding:8px 12px;margin:8px 0;background:var(--bg)}
 </style></head><body><main>
 <h1>Maj Vaj <span id="mode" class="badge">...</span></h1>
 <p class="mut">Freqtrade places the (paper) orders. Grok checks the news. Your money rules cap everything. <a id="back" href="/">&larr; Keys</a> &middot; <span id="ver"></span></p>
 <div id="msg"></div>
 
-<div class="card"><h2>Bot</h2><div id="bot" class="mut">-</div></div>
+<div class="card"><h2>Bot</h2><div id="bot" class="mut">-</div>
+<div class="row" style="margin-top:10px"><span class="switch" id="modeswitch"><span class="track" id="track"><span class="knob"></span></span><span id="modelabel">Paper trading</span></span>
+<span id="modestate" class="mut"></span></div>
+<details style="margin-top:8px"><summary>Live readiness checks</summary><ul id="ready" class="mut"></ul>
+<p class="mut">Live trading stays locked until every check passes. The approval passphrase and the trade-enabled Kraken key are set only from the server console (python3 -m desk.livemode set-passphrase / set-trade-key), never from this page.</p></details></div>
+
+<div class="card"><h2>Trading on / off</h2>
+<div class="row"><span class="switch" id="sw_trade"><span class="track" id="trk_trade"><span class="knob"></span></span><span id="sw_trade_txt">-</span></span></div>
+<div id="cbox" class="confirm"><div id="ctext"></div>
+<div class="row" style="margin-top:8px"><input id="cphrase" autocomplete="off" placeholder="type the phrase"><button id="cgo">Confirm</button><button id="ccancel">Cancel</button></div></div>
+<p class="mut">Asks for a typed phrase, so a stray click never changes anything. Pausing stops new trades only; open trades keep being managed. Your choice is kept across restarts. Everything else runs by itself: the bot trades, Grok checks on its schedule, the watchdog keeps it alive.</p></div>
+
+<dialog id="dlg"><h2 id="dtitle"></h2><div class="warnbox" id="dwarn"></div><div id="dscope" class="mut"></div><ul id="dready" class="mut"></ul>
+<p><label>Type <b id="dphrase"></b> to confirm<br><input id="dtyped" style="width:100%" autocomplete="off"></label></p>
+<p id="dpassrow"><label>Approval passphrase<br><input id="dpass" type="password" style="width:100%" autocomplete="off"></label></p>
+<p><label><input type="checkbox" id="dack" style="width:auto"> I have read this warning (<span id="dver"></span>)</label></p>
+<div class="row"><button id="dcancel" autofocus>Cancel</button><button id="dok"></button></div><div id="dmsg" class="bad"></div></dialog>
 
 <div class="card"><div class="stats">
 <div class="stat"><b id="bankroll">-</b><span>Authorized bankroll</span></div>
@@ -31,10 +56,10 @@ input{width:110px}#msg{min-height:1.3em;margin:6px 0}
 <div class="stat"><b id="today">-</b><span>Today's net</span></div></div></div>
 
 <div class="card"><h2>Fundamentals verdict</h2><div id="verdict" class="big">-</div><div id="vreasons" class="mut"></div>
-<div class="row" style="margin-top:8px"><button id="vnow">Check now</button>
+<div class="row" style="margin-top:8px"><button id="vnow">Scout now</button>
 <label>Grok checks at (UTC) <input id="v_times" style="width:200px"></label><button id="vsave">Save times</button>
 <span id="vnext" class="mut"></span></div>
-<p class="mut">Grok only runs at these times (plus Check now). Defaults: 00:00 Tokyo open, 07:00 London open, 13:30 New York pre-open / London overlap. Each verdict lasts until the next check plus one hour; if a check fails, the bot stands down when the old verdict runs out.</p>
+<p class="mut">Grok only runs at these times (plus Scout now). Defaults: 00:00 Tokyo open, 07:00 London open, 13:30 New York pre-open / London overlap. Each verdict lasts until the next check plus one hour; if a check fails, the bot stands down when the old verdict runs out.</p>
 <details style="margin-top:8px"><summary>Recent checks</summary><div class="wrap"><table id="vhist"></table></div></details></div>
 
 <div class="card"><h2>Open trades</h2><div class="wrap"><table id="open"></table></div></div>
@@ -59,6 +84,10 @@ input{width:110px}#msg{min-height:1.3em;margin:6px 0}
 <p class="mut">Winning trades' net profit is protected and never traded again; losses reduce the active bankroll. Open trades are always managed, whatever these settings say.
 Opportunity mode, after the goal: one extra trade at a time, only in the ticked sessions, smaller, with a stronger signal and a NORMAL news verdict, sized so a loss can't take back more than you chose to give back.</p></div>
 
+<div class="card"><h2>Outside data (stored point-in-time)</h2><div id="data" class="mut">-</div>
+<div class="row" style="margin-top:8px"><button id="drefresh">Refresh now</button></div>
+<p class="mut">Fear &amp; Greed and the FOMC calendar need no key. Add a free FRED key on the Keys page for CPI / jobs / PPI release times and first-release macro values. The bot takes no new trades from 60 minutes before to 90 minutes after these events.</p></div>
+
 <div class="card"><h2>Reports</h2><div class="row"><button id="rev">Send evening report now</button><button id="rwk">Send weekly review now</button></div>
 <pre id="rtext" class="mut" style="white-space:pre-wrap"></pre></div>
 
@@ -75,11 +104,34 @@ async function api(path,body){
 }
 function say(r){$('msg').textContent=r.message||r.error||'';$('msg').className=r.ok?'ok':'bad';}
 const LABEL={normal:['NORMAL','ok'],caution:['CAUTION: half size','warn'],stand_down:['STAND DOWN: no new trades','bad']};
-let filled=false;
+let filled=false, lastMode=null, ctl=null, pending=null;
+function ask(){
+  const p=ctl.phrases,on=!ctl.trading_wanted;
+  pending={on:on,phrase:on?p.resume:p.pause};
+  $('ctext').innerHTML=(on?'<b>Resume trading?</b> The bot may open new trades again, within your money rules and the news verdict.'
+    :'<b>Pause trading?</b> No new trades. Open trades keep their stops and exits. Kept across restarts until you resume.')+
+    '<br>To confirm, type <b>'+pending.phrase+'</b>.';
+  $('cphrase').value='';$('cbox').style.display='block';$('cphrase').focus();
+}
+function openDialog(){
+  if(!lastMode)return;const toLive=lastMode.state.mode==='paper';
+  if(toLive&&lastMode.locked){say({ok:false,message:'Live trading is locked: open "Live readiness checks" to see what is missing.'});return;}
+  $('dtitle').textContent=toLive?'Enable live trading?':'Return to paper trading?';
+  $('dwarn').textContent=toLive?lastMode.warning_off:lastMode.warning_on;$('dver').textContent=lastMode.warning_version;
+  $('dphrase').textContent=toLive?lastMode.phrase_live:lastMode.phrase_paper;$('dpassrow').style.display=toLive?'':'none';
+  $('dready').innerHTML=toLive?lastMode.checks.map(c=>'<li>'+(c.ok?'✓ ':'✗ ')+esc(c.name)+'</li>').join(''):'';
+  $('dok').textContent=toLive?'Review done: enable live trading':'Confirm return to paper';
+  $('dtyped').value='';$('dpass').value='';$('dack').checked=false;$('dmsg').textContent='';$('dlg').dataset.to=toLive?'live':'paper';
+  $('dlg').showModal();$('dcancel').focus();
+}
 async function refresh(){
   const s=await api('status');
   if(!s.ok){say(s);return;}
   $('ver').textContent='version '+s.version;
+  ctl=s.control;
+  const live=b=>b&&b.ok&&b.state;const st=live(s.bot);
+  $('trk_trade').className='track'+(ctl.trading_wanted?' on':'');
+  $('sw_trade_txt').textContent='Trading: '+(ctl.trading_wanted?'ON':'PAUSED')+(st&&((st==='running')!==ctl.trading_wanted)?' (applying...)':'');
   const b=s.bot;
   if(b.ok){
     $('mode').textContent=b.dry_run?'paper (dry-run)':'LIVE';$('mode').className='badge '+(b.dry_run?'ok':'bad');
@@ -88,6 +140,16 @@ async function refresh(){
       ' &middot; closed trades '+(b.closed_trades??0)+' (won '+(b.winning??0)+', lost '+(b.losing??0)+') &middot; all-time '+money(b.profit_all)+' USD';
     $('bot').className=age!=null&&age>20?'bad':'';
   }else{$('mode').textContent='bot not answering';$('mode').className='badge bad';$('bot').textContent=b.error;$('bot').className='bad';}
+  const md=s.mode;
+  if(md){const paper=(md.state.mode==='paper');$('track').className='track'+(paper?' on':'');
+    $('modelabel').textContent=paper?'Paper trading: ON':(md.state.mode==='live'?'Paper trading: OFF (LIVE, real money)':'Returning to paper (live-exit-only)');
+    $('modestate').textContent=(md.locked?'Live is locked':'Live is unlocked')+(md.state.since?' · mode since '+when(md.state.since):'');
+    $('ready').innerHTML=md.checks.map(c=>'<li class="'+(c.ok?'ok':'bad')+'">'+(c.ok?'✓ ':'✗ ')+esc(c.name)+' — '+esc(c.detail)+'</li>').join('');
+    lastMode=md;}
+  const dt=s.data;
+  if(dt){$('data').innerHTML=(dt.fetches||[]).map(f=>esc(f.source)+': '+(f.ok?'<span class="ok">ok</span>':'<span class="bad">'+esc(f.message)+'</span>')+' ('+when(f.at)+')').join(' · ')+
+    '<br>Stored: '+Object.entries(dt.counts||{}).map(([k,v])=>esc(k)+' '+v).join(', ')+
+    '<br>Next events: '+((dt.upcoming||[]).map(e=>esc(e.name)+' '+when(e.at)).join(' · ')||'none known');}
   const k=s.books;
   if(k){$('bankroll').textContent=money(k.bankroll);$('active').textContent=money(k.active);$('protected').textContent=money(k.protected);
     $('today').textContent=(k.today_net>=0?'+':'')+money(k.today_net);$('today').className=k.today_net>=0?'ok':'bad';}
@@ -108,7 +170,16 @@ async function refresh(){
 $('msave').onclick=async()=>{say(await api('money',{bankroll:$('m_bank').value,daily_loss_limit_pct:$('m_loss').value,daily_goal_usd:$('m_goal').value,
   goal_mode:$('m_mode').value,goal_reduce_pct:$('m_red').value,goal_keep_pct:$('m_keep').value,timezone:$('m_tz').value.trim(),
   goal_sessions:[...document.querySelectorAll('.m_s')].filter(c=>c.checked).map(c=>c.value)}));refresh();};
+$('modeswitch').onclick=openDialog;
+$('dcancel').onclick=()=>$('dlg').close();
+$('dok').onclick=async()=>{const r=await api('mode',{to:$('dlg').dataset.to,phrase:$('dtyped').value,passphrase:$('dpass').value,ack:$('dack').checked});
+  if(r.ok){$('dlg').close();say(r);refresh();}else{$('dmsg').textContent=r.message||'Refused.';}};
+$('drefresh').onclick=async()=>say(await api('data_refresh',{}));
 $('vsave').onclick=async()=>{say(await api('schedule',{times:$('v_times').value}));refresh();};
+$('sw_trade').onclick=()=>ctl&&ask();
+$('ccancel').onclick=()=>{$('cbox').style.display='none';pending=null;say({ok:true,message:'Cancelled. Nothing changed.'});};
+$('cgo').onclick=async()=>{if(!pending)return;const r=await api('trading',{on:pending.on,confirm:$('cphrase').value});
+  say(r);if(r.ok){$('cbox').style.display='none';pending=null;}refresh();};
 $('vnow').onclick=async()=>say(await api('verdict_now',{}));
 $('rev').onclick=async()=>{const r=await api('report_now',{kind:'evening'});say(r);$('rtext').textContent=r.text||'';};
 $('rwk').onclick=async()=>{const r=await api('report_now',{kind:'weekly'});say(r);$('rtext').textContent=r.text||'';};

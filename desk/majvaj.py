@@ -15,6 +15,8 @@ from .engine import TelegramNotifier, load_settings
 from .ftapi import FreqtradeAPI, FtError
 from .market import KrakenMarket, MarketError
 from .scout import GrokResearch
+from .econdata import EconData
+from .livemode import ModeDesk, WARNING_OFF, WARNING_ON, WARNING_VERSION, PHRASE_LIVE, PHRASE_PAPER, locked
 from .verdict import VerdictService, write_atomic
 
 GOAL_MODES = ("continue", "stop", "opportunity")
@@ -23,6 +25,8 @@ MONEY_DEFAULTS = {"bankroll": 1000.0, "daily_goal_usd": 0.0, "goal_mode": "stop"
                   "goal_keep_pct": 50, "goal_sessions": ["Asia/Tokyo", "London/New York overlap"],
                   "daily_loss_limit_pct": 3.0, "timezone": "America/Denver"}
 PAIRS = ("BTC/USD", "ETH/USD", "SOL/USD")
+PAUSE_PHRASE = "PAUSE TRADING"
+RESUME_PHRASE = "RESUME TRADING"
 
 
 def clean_money(raw, current=None):
@@ -128,7 +132,43 @@ class MajVaj:
         research = GrokResearch(lambda: store.get("grok_key"), lambda: settings_fn().grok_model)
         self.verdicts = VerdictService(store.dir, self.cfg["verdict_file"], research, lambda: store.get("grok_key"),
                                        settings_fn, self.notifier, clock=clock)
+        self.econ = EconData(store.dir, os.path.dirname(self.cfg["verdict_file"]), lambda: store.get("fred_key"))
+        self.mode = ModeDesk(store.dir, self.verdicts._meta, clock=clock)
         self.stop_event, self.thread = threading.Event(), None
+
+    # ------------------------------------------------------------ mode (paper / live)
+    def _checks_7d(self):
+        return [v for v in self.verdicts.history(since=self.clock() - 7 * 86400, limit=500)]
+
+    def mode_info(self, bot=None):
+        bot = bot or self.ft.summary()
+        if bot.get("ok") and bot.get("dry_run") and not self.verdicts._meta("paper_since"):
+            self.verdicts._meta("paper_since", self.clock())
+        closed = bot.get("closed_trades") or 0 if bot.get("ok") and bot.get("dry_run") else 0
+        checks = self.mode.checks(closed, self._checks_7d(), self.money())
+        return {"state": self.mode.state(), "dry_run": bot.get("dry_run") if bot.get("ok") else None,
+                "checks": [{"name": n, "ok": ok, "detail": d} for n, ok, d in checks], "locked": locked(checks),
+                "warning_off": WARNING_OFF, "warning_on": WARNING_ON, "warning_version": WARNING_VERSION,
+                "phrase_live": PHRASE_LIVE, "phrase_paper": PHRASE_PAPER}
+
+    def mode_request(self, body):
+        bot = self.ft.summary()
+        info = self.mode_info(bot)
+        to = body.get("to")
+        checks = [(c["name"], c["ok"], c["detail"]) for c in info["checks"]]
+        m = self.money()
+        scope = {"bankroll": m["bankroll"], "daily_loss_limit_pct": m["daily_loss_limit_pct"],
+                 "max_open_trades": bot.get("max_open_trades"), "strategy": bot.get("strategy"),
+                 "pairs": ["BTC/USD", "ETH/USD", "SOL/USD"], "venue": "Kraken spot"}
+        res = self.mode.request(to, body.get("phrase"), body.get("passphrase"), bool(body.get("ack")), checks, scope)
+        if res["ok"] and to == "paper":
+            try:
+                self.ft.pause()  # fence new entries right away; the applier finishes the job
+            except FtError:
+                pass
+        if res["ok"]:
+            self.notifier.recovery("Maj Vaj mode request: %s (%s)" % (to, res["message"]))
+        return res
 
     # ------------------------------------------------------------ money settings
     def money(self):
@@ -148,6 +188,57 @@ class MajVaj:
             m["bankroll"], ("%.2f USD (%s)" % (m["daily_goal_usd"], m["goal_mode"])) if m["daily_goal_usd"] else "off",
             m["daily_loss_limit_pct"]))
         return {"ok": True, "message": "Saved. The bot uses it from its next entry decision."}
+
+    # ------------------------------------------------------------ trading switches
+    def control_file(self):
+        return os.path.join(os.path.dirname(self.money_file), "control.json")
+
+    def control(self):
+        try:
+            with open(self.control_file(), "r", encoding="utf-8") as f:
+                c = json.load(f)
+            return c if isinstance(c, dict) else {}
+        except (OSError, ValueError):
+            return {}
+
+    def wanted_trading(self):
+        return self.control().get("trading", "running") != "paused"
+
+    def set_trading(self, on, phrase):
+        """Pause or resume new entries. Needs the exact phrase, so a stray click can never flip it."""
+        want = RESUME_PHRASE if on else PAUSE_PHRASE
+        if (phrase or "").strip().upper() != want:
+            return {"ok": False, "message": "Nothing changed. To confirm, type exactly: %s" % want}
+        c = self.control()
+        c.update(trading="running" if on else "paused", changed_at=self.clock(), changed_by="Maj Vaj page")
+        write_atomic(self.control_file(), c)
+        try:
+            self.ft.start() if on else self.ft.pause()
+            applied = True
+        except FtError:
+            applied = False  # the enforcement loop applies it as soon as the bot answers
+        self.notifier.desk("Maj Vaj trading %s from the Maj Vaj page.%s" % (
+            "RESUMED" if on else "PAUSED (no new entries; open trades still managed)",
+            "" if applied else " The bot is not answering yet; it will be applied when it does."))
+        return {"ok": True, "message": "Trading %s." % ("resumed" if on else "paused: no new entries, open trades still managed")}
+
+    def enforce_control(self):
+        """Keep the bot in the state you chose, even after it restarts (Freqtrade always starts running)."""
+        bot = self.ft.summary()
+        if not bot.get("ok"):
+            return None
+        want = self.wanted_trading()
+        if not want and bot.get("state") == "running":
+            self.ft.pause()
+            return "paused"
+        if want and bot.get("state") == "paused":
+            # Never undo the paper/live switch's own fence: no resuming while live trades are being wound
+            # down (live_exit_only) or while a mode change is waiting to be applied.
+            if self.mode.state().get("mode") not in ("paper", "live") or os.path.exists(self.mode.request_file):
+                return None
+            self.ft.start()
+            return "running"
+        return None
 
     # ------------------------------------------------------------ bot data
     def closed_trades(self):
@@ -191,7 +282,10 @@ class MajVaj:
             current = None
         return {"bot": bot, "books": books, "money": self.money(), "verdict_file": current,
                 "latest_verdict": latest, "verdicts": self.verdicts.history(limit=25), "now": self.clock(),
-                "schedule": self.verdicts.schedule_text(), "next_check": self.verdicts.next_check()}
+                "schedule": self.verdicts.schedule_text(), "next_check": self.verdicts.next_check(),
+                "mode": self.mode_info(bot), "data": self.econ.status(),
+                "control": {"trading_wanted": self.wanted_trading(),
+                            "phrases": {"pause": PAUSE_PHRASE, "resume": RESUME_PHRASE}}}
 
     def save_schedule(self, items):
         if isinstance(items, str):
@@ -275,13 +369,15 @@ class MajVaj:
         if not os.path.exists(self.money_file):
             write_atomic(self.money_file, dict(MONEY_DEFAULTS))
         self.verdicts.start()
+        self.econ.start()
         self.thread = threading.Thread(target=self._loop, daemon=True, name="majvaj-reports")
         self.thread.start()
 
     def _loop(self):
         while not self.stop_event.is_set():
-            try:
-                self._report_tick()
-            except Exception:
-                pass
+            for job in (self.enforce_control, self._report_tick):
+                try:
+                    job()
+                except Exception:
+                    pass
             self.stop_event.wait(60)

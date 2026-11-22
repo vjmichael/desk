@@ -14,7 +14,7 @@ import subprocess
 import sys
 import time
 
-from . import connectors, net
+from . import connectors, livemode, net
 from .ftapi import FreqtradeAPI, FtError
 from .store import Store
 
@@ -118,7 +118,23 @@ def observe(cfg, ft, now):
     return obs
 
 
-def handle_commands(store, ft, state, obs, run):
+def remember_choice(cfg, trading):
+    """Record a /pause or /resume so Desk keeps the bot that way after restarts."""
+    path = os.path.join(os.path.dirname(cfg["money_file"]), "control.json")
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            c = json.load(f)
+    except (OSError, ValueError):
+        c = {}
+    c.update(trading=trading, changed_at=time.time(), changed_by="Recovery bot")
+    tmp = path + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(c, f)
+    os.chmod(tmp, 0o644)
+    os.replace(tmp, path)
+
+
+def handle_commands(store, ft, state, obs, run, cfg=None):
     """Answer Recovery-bot commands, only from the saved chat. Returns replies sent."""
     token, chat = store.get("telegram_recovery_token"), store.get("telegram_recovery_chat_id")
     if not token or not chat:
@@ -143,12 +159,18 @@ def handle_commands(store, ft, state, obs, run):
         elif cmd == "/pause":
             try:
                 ft.pause()
+                if cfg:
+                    remember_choice(cfg, "paused")
                 reply = "Paused: no new entries. Open trades are still managed. Send /resume to undo."
             except FtError as e:
                 reply = "Could not pause: %s" % e
+        elif cmd == "/resume" and (livemode._read(livemode.STATE_FILE) or {"mode": "paper"}).get("mode") not in ("paper", "live"):
+            reply = "Not resumed: the bot is winding down live trades on its way back to paper. It resumes by itself after."
         elif cmd == "/resume":
             try:
                 ft.start()
+                if cfg:
+                    remember_choice(cfg, "running")
                 reply = "Resumed: the bot may open trades again (within your money rules and the verdict)."
             except FtError as e:
                 reply = "Could not resume: %s" % e
@@ -201,7 +223,19 @@ def main(config_path="/etc/majvaj/majvaj.json"):
                 connectors._tg(tok, "sendMessage", {"chat_id": chat, "text": text[:3500]})
             except net.NetError:
                 pass
-    handle_commands(store, ft, state, obs, run)
+    handle_commands(store, ft, state, obs, run, cfg)
+
+    def recovery(text):
+        if tok and chat:
+            try:
+                connectors._tg(tok, "sendMessage", {"chat_id": chat, "text": text[:3500]})
+            except net.NetError:
+                pass
+    try:
+        state["mode_last"] = livemode.apply_pending(
+            ft, os.path.join(cfg.get("desk_data_dir", "/var/lib/desk"), "mode_request.json"), now, run, recovery)
+    except Exception as e:  # never let a mode problem stop the watchdog
+        recovery("Watchdog: mode switch step failed (%s); no change was made." % type(e).__name__)
     ping_heartbeat(cfg.get("heartbeat_url"), healthy)
     state["last_run"] = now
     state["last_obs"] = obs

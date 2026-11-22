@@ -60,6 +60,8 @@ class DeskServer(ThreadingHTTPServer):
             return connectors.kraken_private_test(s.get("kraken_key"), s.get("kraken_secret"))
         if name == "grok":
             return connectors.grok_test(s.get("grok_key"))
+        if name == "fred":
+            return connectors.fred_test(s.get("fred_key"))
         for bot, (tok, chat, label) in TELEGRAM_BOTS.items():
             if name == "telegram_" + bot:
                 token, chat_id = s.get(tok), s.get(chat)
@@ -183,6 +185,13 @@ class Handler(BaseHTTPRequestHandler):
             action = path[len("/api/majvaj/"):]
             if action == "money":
                 return self._send(200, mv.save_money(body))
+            if action == "mode":
+                return self._send(200, mv.mode_request(body))
+            if action == "data_refresh":
+                threading.Thread(target=mv.econ.refresh, daemon=True).start()
+                return self._send(200, {"ok": True, "message": "Refreshing outside data; this takes up to a minute."})
+            if action == "trading":
+                return self._send(200, mv.set_trading(bool(body.get("on")), body.get("confirm")))
             if action == "schedule":
                 return self._send(200, mv.save_schedule(body.get("times")))
             if action == "verdict_now":
