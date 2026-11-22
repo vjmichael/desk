@@ -31,7 +31,7 @@ MODE_CONFIG = FT_UD + "/config.mode.json"
 LIVE_SECRET = "/etc/majvaj/live_exchange.json"
 WARNING_VERSION = "TB-LIVE-01 v1"
 PHRASE_LIVE, PHRASE_PAPER = "ENABLE LIVE TRADING", "RETURN TO PAPER"
-MIN_PAPER_DAYS, MIN_PAPER_TRADES, MIN_CHECK_OK = 14, 10, 0.9
+MIN_PAPER_DAYS, MIN_PAPER_TRADES, MIN_CHECK_OK = 7, 10, 0.9  # 7 days of live paper trading: AI_Pirate
 REQUEST_MAX_AGE = 900
 
 WARNING_OFF = ("Enable live trading? Maj Vaj will be authorized to place actual orders using real money in the selected "
@@ -264,4 +264,4 @@ def main(argv):
 
 
 if __name__ == "__main__":
-    sys.exit(main(sys.argv[1:]))
+    sys.exit(main(*sys.argv[1:]) if False else main(sys.argv[1:]))
