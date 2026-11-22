@@ -32,10 +32,21 @@ def main():
     ap.add_argument("--no-browser", action="store_true")
     ap.add_argument("--token-file", help="keep the access token in this file so it survives restarts (server use)")
     ap.add_argument("--resume", action="store_true", help="carry on paper trading if it was running before a restart")
+    ap.add_argument("--majvaj-config", help="Maj Vaj settings file (Freqtrade API, verdict and money files); enables the bot layer if present")
     args = ap.parse_args()
     store = Store(args.data_dir)
     token = load_token(args.token_file) if args.token_file else None
-    server = DeskServer(store, port=args.port, token=token)
+    majvaj = None
+    if args.majvaj_config and os.path.exists(args.majvaj_config):
+        from .majvaj import MajVaj
+        try:
+            majvaj = MajVaj(store, args.majvaj_config)
+        except (OSError, ValueError, KeyError) as e:
+            print("Maj Vaj layer not started: %s" % type(e).__name__)
+    server = DeskServer(store, port=args.port, token=token, majvaj=majvaj)
+    if majvaj is not None:
+        majvaj.start()
+        print("Maj Vaj layer running (fundamentals verdicts, reports).")
     url = "http://127.0.0.1:%d/?t=%s" % (server.port, server.token)
     print("Desk version %s. Open this address in your browser (it only works on this computer):" % __version__)
     print(url)

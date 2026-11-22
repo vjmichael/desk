@@ -13,6 +13,7 @@ from .store import Store, SECRET_FIELDS
 
 UI_PATH = os.path.join(os.path.dirname(__file__), "ui.html")
 PAPER_PATH = os.path.join(os.path.dirname(__file__), "paper.html")
+MAJVAJ_PATH = os.path.join(os.path.dirname(__file__), "majvaj.html")
 MAX_BODY = 64 * 1024
 
 TELEGRAM_BOTS = {
@@ -24,8 +25,9 @@ TELEGRAM_BOTS = {
 class DeskServer(ThreadingHTTPServer):
     daemon_threads = True
 
-    def __init__(self, store, port=8765, token=None, engine_factory=None, research_factory=None):
+    def __init__(self, store, port=8765, token=None, engine_factory=None, research_factory=None, majvaj=None):
         self.store = store
+        self.majvaj = majvaj
         self.token = token or secrets.token_urlsafe(24)
         self._engine, self._engine_lock = None, threading.Lock()
         self._engine_factory = engine_factory or engine_mod.build_engine
@@ -122,6 +124,16 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/paper":
             with open(PAPER_PATH, "rb") as f:
                 return self._send(200, f.read(), "text/html; charset=utf-8")
+        if path == "/majvaj":
+            with open(MAJVAJ_PATH, "rb") as f:
+                return self._send(200, f.read(), "text/html; charset=utf-8")
+        if path == "/api/majvaj/status":
+            if not self._authorized():
+                return self._send(403, {"ok": False, "error": "bad token"})
+            mv = self.server.majvaj
+            if mv is None:
+                return self._send(200, {"ok": False, "error": "Maj Vaj (the Freqtrade bot) is not set up on this machine."})
+            return self._send(200, dict(mv.status(), ok=True, version=__version__))
         if path == "/api/paper/status":
             if not self._authorized():
                 return self._send(403, {"ok": False, "error": "bad token"})
@@ -164,6 +176,24 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(200, {"ok": started, "message": "Started." if started else "Something is already running."})
         if path.startswith("/api/paper/"):
             return self._paper(path[len("/api/paper/"):], body)
+        if path.startswith("/api/majvaj/"):
+            mv = self.server.majvaj
+            if mv is None:
+                return self._send(200, {"ok": False, "message": "Maj Vaj is not set up on this machine."})
+            action = path[len("/api/majvaj/"):]
+            if action == "money":
+                return self._send(200, mv.save_money(body))
+            if action == "verdict_now":
+                mv.verdicts._meta("last_run", 0)
+                return self._send(200, {"ok": True, "message": "A fundamentals check starts within a minute."})
+            if action == "report_now":
+                kind = body.get("kind")
+                if kind not in ("evening", "weekly"):
+                    return self._send(400, {"ok": False, "error": "unknown report"})
+                text = mv.evening_report() if kind == "evening" else mv.weekly_review()
+                mv.notifier.desk(text)
+                return self._send(200, {"ok": True, "message": "Sent to the Desk Telegram bot.", "text": text})
+            return self._send(404, {"ok": False, "error": "unknown action"})
         if path.startswith("/api/test/"):
             res = self.server.run_test(path[len("/api/test/"):])
             if res is None:

@@ -17,7 +17,7 @@
 <h1>Desk: connections <small id="ver" style="font-size:13px;color:#777;font-weight:normal"></small></h1>
 <p class="note">Keys are stored only in this computer's <code>data</code> folder and are never shown again or sent anywhere except to the service they belong to. Leave a field empty to keep what is already saved.
 Paper trading needs no trading permission: create the Kraken key with <b>Query funds only</b> and <b>no withdrawals</b>.</p>
-<p><a id="paperlink" href="#">Paper trading &rarr;</a></p>
+<p><a id="mvlink" href="#">Maj Vaj trading bot &rarr;</a> &nbsp; <a id="paperlink" href="#">Desk paper trading (legacy) &rarr;</a></p>
 <div id="app"></div>
 <script>
 const TOKEN=new URLSearchParams(location.search).get('t')||'';
@@ -57,6 +57,7 @@ async function save(sec){
 async function test(sec,name){show(sec.id,{ok:true,message:'Testing...'});show(sec.id,await api('test/'+name,{}));}
 async function find(sec){const r=await api('find_chat/'+sec.find,{});show(sec.id,r);refresh();}
 document.getElementById('paperlink').href='/paper?t='+encodeURIComponent(TOKEN);
+document.getElementById('mvlink').href='/majvaj?t='+encodeURIComponent(TOKEN);
 document.getElementById('app').innerHTML='';
 for(const sec of SECTIONS){
   const d=document.createElement('div');d.className='card';
