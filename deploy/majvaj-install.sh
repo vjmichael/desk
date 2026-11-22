@@ -84,8 +84,11 @@ echo "== 7/8 Services"
 CPUS=$(python3 -c "import os; print(max(1.0, (os.cpu_count() or 1) - 0.5))")
 MEM=$(python3 -c "import os; t=os.sysconf('SC_PAGE_SIZE')*os.sysconf('SC_PHYS_PAGES')/2**20; print('%dm' % max(1024, min(5120, t-1536)))")
 JOBS=$(python3 -c "import os; print(max(1, (os.cpu_count() or 1)))")
-python3 -c "import json,sys; p=sys.argv[1]; c=json.load(open(p)); c['freqai']['model_training_parameters']['n_jobs']=int(sys.argv[2]); json.dump(c,open(p,'w'),indent=4)" "$UD/config-4h.json" "$JOBS"
-echo "   bot limits: $CPUS CPUs, $MEM memory, $JOBS training threads"
+# A saved model only fits the strategy version that trained it. Tie the model name to the strategy code, so a
+# strategy update trains a fresh model instead of crashing on the old one ("different features").
+MODEL_ID="majvaj-4h-$(cat "$UD/strategies/"*.py | sha256sum | cut -c1-10)"
+python3 -c "import json,sys; p=sys.argv[1]; c=json.load(open(p)); c['freqai']['model_training_parameters']['n_jobs']=int(sys.argv[2]); c['freqai']['identifier']=sys.argv[3]; json.dump(c,open(p,'w'),indent=4)" "$UD/config-4h.json" "$JOBS" "$MODEL_ID"
+echo "   bot limits: $CPUS CPUs, $MEM memory, $JOBS training threads; model $MODEL_ID"
 cat > /etc/systemd/system/majvaj-freqtrade.service <<UNIT
 [Unit]
 Description=Maj Vaj trading bot (Freqtrade + FreqAI; paper unless switched live from the Desk page)
