@@ -16,7 +16,7 @@ from .ftapi import FreqtradeAPI, FtError
 from .market import KrakenMarket, MarketError
 from .scout import GrokResearch
 from .econdata import EconData
-from .livemode import ModeDesk, WARNING_OFF, WARNING_ON, WARNING_VERSION, PHRASE_LIVE, PHRASE_PAPER, locked
+from .livemode import ModeDesk, WARNING_OFF, WARNING_ON, WARNING_VERSION, PHRASE_LIVE, PHRASE_PAPER, blockers
 from .verdict import VerdictService, write_atomic
 
 GOAL_MODES = ("continue", "stop", "opportunity")
@@ -140,14 +140,21 @@ class MajVaj:
     def _checks_7d(self):
         return [v for v in self.verdicts.history(since=self.clock() - 7 * 86400, limit=500)]
 
+    def _trade_key_saved(self):
+        return bool(self.store.get("kraken_trade_key") and self.store.get("kraken_trade_secret"))
+
     def mode_info(self, bot=None):
         bot = bot or self.ft.summary()
         if bot.get("ok") and bot.get("dry_run") and not self.verdicts._meta("paper_since"):
             self.verdicts._meta("paper_since", self.clock())
         closed = bot.get("closed_trades") or 0 if bot.get("ok") and bot.get("dry_run") else 0
-        checks = self.mode.checks(closed, self._checks_7d(), self.money())
+        money = self.money()
+        checks = self.mode.checks(closed, self._checks_7d(), money)
+        block = blockers(self._trade_key_saved(), money)
         return {"state": self.mode.state(), "dry_run": bot.get("dry_run") if bot.get("ok") else None,
-                "checks": [{"name": n, "ok": ok, "detail": d} for n, ok, d in checks], "locked": locked(checks),
+                "checks": [{"name": n, "ok": ok, "detail": d} for n, ok, d in checks],
+                "blockers": block, "locked": bool(block),
+                "scope": {"bankroll": money["bankroll"], "daily_loss_limit_pct": money["daily_loss_limit_pct"]},
                 "warning_off": WARNING_OFF, "warning_on": WARNING_ON, "warning_version": WARNING_VERSION,
                 "phrase_live": PHRASE_LIVE, "phrase_paper": PHRASE_PAPER}
 
@@ -155,12 +162,12 @@ class MajVaj:
         bot = self.ft.summary()
         info = self.mode_info(bot)
         to = body.get("to")
-        checks = [(c["name"], c["ok"], c["detail"]) for c in info["checks"]]
         m = self.money()
         scope = {"bankroll": m["bankroll"], "daily_loss_limit_pct": m["daily_loss_limit_pct"],
                  "max_open_trades": bot.get("max_open_trades"), "strategy": bot.get("strategy"),
                  "pairs": ["BTC/USD", "ETH/USD", "SOL/USD"], "venue": "Kraken spot"}
-        res = self.mode.request(to, body.get("phrase"), body.get("passphrase"), bool(body.get("ack")), checks, scope)
+        res = self.mode.request(to, body.get("phrase"), bool(body.get("ack")), info["blockers"], scope,
+                                [c["name"] for c in info["checks"] if not c["ok"]])
         if res["ok"] and to == "paper":
             try:
                 self.ft.pause()  # fence new entries right away; the applier finishes the job

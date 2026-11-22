@@ -232,8 +232,10 @@ def main(config_path="/etc/majvaj/majvaj.json"):
             except net.NetError:
                 pass
     try:
+        desk_dir = cfg.get("desk_data_dir", "/var/lib/desk")
         state["mode_last"] = livemode.apply_pending(
-            ft, os.path.join(cfg.get("desk_data_dir", "/var/lib/desk"), "mode_request.json"), now, run, recovery)
+            ft, os.path.join(desk_dir, "mode_request.json"), now, run, recovery,
+            desk_secrets=os.path.join(desk_dir, "secrets.json"))
     except Exception as e:  # never let a mode problem stop the watchdog
         recovery("Watchdog: mode switch step failed (%s); no change was made." % type(e).__name__)
     ping_heartbeat(cfg.get("heartbeat_url"), healthy)

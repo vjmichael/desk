@@ -58,6 +58,8 @@ class DeskServer(ThreadingHTTPServer):
             return connectors.kraken_public_test()
         if name == "kraken_private":
             return connectors.kraken_private_test(s.get("kraken_key"), s.get("kraken_secret"))
+        if name == "kraken_trade":
+            return connectors.kraken_private_test(s.get("kraken_trade_key"), s.get("kraken_trade_secret"))
         if name == "grok":
             return connectors.grok_test(s.get("grok_key"))
         if name == "fred":
