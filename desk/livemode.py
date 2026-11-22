@@ -134,10 +134,12 @@ class ModeDesk:
 
 # ------------------------------------------------------------------ root side (watchdog)
 def trade_key(desk_secrets=DESK_SECRETS, live_secret=LIVE_SECRET):
-    """The trade-enabled key: from the Keys page (Desk's secrets), or an older console-installed file."""
-    d = _read(desk_secrets) or {}
-    if d.get("kraken_trade_key") and d.get("kraken_trade_secret"):
-        return {"key": d["kraken_trade_key"], "secret": d["kraken_trade_secret"]}
+    """The trade-enabled key in use on the Keys page, or an older console-installed file."""
+    from .store import active_value, load_entries
+    entries = load_entries(desk_secrets)
+    k, s = active_value(entries, "kraken_trade_key"), active_value(entries, "kraken_trade_secret")
+    if k and s:
+        return {"key": k, "secret": s}
     s = _read(live_secret) or {}
     return {"key": s["key"], "secret": s["secret"]} if s.get("key") and s.get("secret") else None
 
