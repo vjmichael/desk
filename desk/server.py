@@ -209,7 +209,7 @@ def _paper_action(self, action, body):
         return {"ok": True, "message": "Paper account reset to %.2f USD." % equity}
     if action == "settings":
         engine_mod.save_settings(self.server.store.dir, {k: body[k] for k in body if k in
-                                 ("scout_minutes", "cycle_minutes", "max_scout_calls_per_day", "grok_model", "session_scouting")})
+                                 ("scout_minutes", "cycle_minutes", "max_scout_calls_per_day", "grok_model", "session_scouting", "research")})
         return {"ok": True, "message": "Settings saved."}
     return None
 

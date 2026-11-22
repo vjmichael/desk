@@ -38,6 +38,7 @@ input.wide{width:150px}
 
 <div class="card"><h2>Open positions</h2><div class="wrap"><table id="open"></table></div></div>
 <div class="card"><h2>Latest scout</h2><div id="lastscout" class="mut">-</div></div>
+<div class="card"><h2>Latest research digest</h2><div id="digest" class="mut" style="white-space:pre-wrap">-</div><div id="digsrc" class="mut"></div></div>
 <div class="card"><h2>Recent decisions (Gate)</h2><div class="wrap"><table id="dec"></table></div></div>
 <div class="card"><h2>Closed trades</h2><div class="wrap"><table id="closed"></table></div></div>
 <div class="card"><h2>Problems</h2><div id="errs" class="mut">None</div></div>
@@ -52,6 +53,7 @@ input.wide{width:150px}
 <label>Check every (min) <input id="s_cycle" type="number"></label>
 <label>Max scout calls/day <input id="s_max" type="number"></label>
 <label><input id="s_sess" type="checkbox" style="width:auto"> Scout by market session</label>
+<label><input id="s_res" type="checkbox" style="width:auto"> Gather news and X sentiment first</label>
 <label>Grok model <input id="s_model" class="wide"></label>
 <button id="save">Save settings</button></div>
 <p class="mut">Changes apply on the next cycle.</p></div>
@@ -101,6 +103,8 @@ async function refresh(){
       o.unrealized==null?'-':'<span class="'+(o.unrealized>=0?'ok':'bad')+'">'+money(o.unrealized)+'</span>',when(o.expires_at)]));
   const ls=s.last_scout;
   $('lastscout').textContent=ls?when(ls.ts)+' - '+(ls.called?(ls.ok?'Grok answered, '+ls.n_proposals+' idea(s)':'Grok call failed'):'not called')+(ls.note?' ('+ls.note+')':''):'The scout has not run yet.';
+  const dg=s.digest;$('digest').textContent=dg?when(dg.ts)+'\n'+dg.text:'No digest yet. It is gathered at the start of each scout round.';
+  $('digsrc').innerHTML=dg&&dg.sources&&dg.sources.length?'Sources: '+dg.sources.map(u=>/^https?:\/\//.test(u)?'<a href="'+esc(u)+'" target="_blank" rel="noopener noreferrer">'+esc(u.replace(/^https?:\/\//,'').slice(0,40))+'</a>':'').join(' | '):'';
   table($('dec'),['Time','Pair','Result','Reason'],
     s.decisions.map(d=>[when(d.ts),esc(d.symbol),d.approved?'<span class="ok">opened</span>':'<span class="bad">rejected</span>',esc(d.reason)]));
   table($('closed'),['Closed','Pair','Entry','Exit','Why','P/L'],
@@ -108,13 +112,13 @@ async function refresh(){
       '<span class="'+(c.pnl>=0?'ok':'bad')+'">'+money(c.pnl)+'</span>']));
   $('errs').innerHTML=s.errors.length?s.errors.slice(-8).map(e=>'<div class="bad">'+esc(typeof e==='string'?e:when(e.ts)+' - '+e.message)+'</div>').join(''):'None';
   if(!formFilled){formFilled=true;$('s_scout').value=s.settings.scout_minutes;$('s_cycle').value=s.settings.cycle_minutes;
-    $('s_max').value=s.settings.max_scout_calls_per_day;$('s_model').value=s.settings.grok_model;$('s_sess').checked=s.settings.session_scouting;}
+    $('s_max').value=s.settings.max_scout_calls_per_day;$('s_model').value=s.settings.grok_model;$('s_sess').checked=s.settings.session_scouting;$('s_res').checked=s.settings.research;}
 }
 async function act(name,body){say({ok:true,message:'Working...'});say(await api(name,body||{}));refresh();}
 $('start').onclick=()=>act('start');$('stop').onclick=()=>act('stop');$('scout').onclick=()=>act('scout_now');
 $('reset').onclick=()=>{if(confirm('Erase all paper history and start over?'))act('reset',{equity:parseFloat($('eq').value)});};
 $('save').onclick=()=>act('settings',{scout_minutes:parseFloat($('s_scout').value),cycle_minutes:parseFloat($('s_cycle').value),
-  max_scout_calls_per_day:parseInt($('s_max').value,10),grok_model:$('s_model').value.trim(),session_scouting:$('s_sess').checked});
+  max_scout_calls_per_day:parseInt($('s_max').value,10),grok_model:$('s_model').value.trim(),session_scouting:$('s_sess').checked,research:$('s_res').checked});
 refresh();setInterval(refresh,5000);
 const pct=n=>n==null?'-':(n>=0?'+':'')+Number(n).toFixed(1)+'%';
 const day=t=>t?new Date(t*1000).toLocaleDateString():'-';

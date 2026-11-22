@@ -14,7 +14,7 @@ from . import connectors, gate, indicators
 from .gate import Account, Policy
 from .market import KrakenMarket, MarketError
 from .paper import PaperAccount
-from .scout import GrokScout
+from .scout import GrokResearch, GrokScout
 
 
 @dataclass
@@ -23,6 +23,7 @@ class Settings:
     cycle_minutes: float = 5
     scout_minutes: float = 60
     session_scouting: bool = True
+    research: bool = True
     max_scout_calls_per_day: int = 24
     grok_model: str = "grok-4.3"
     whitelist: tuple = ("BTC/USD", "ETH/USD", "SOL/USD")
@@ -80,6 +81,8 @@ def _apply(s, raw):
                 pass
     if isinstance(raw.get("session_scouting"), bool):
         s.session_scouting = raw["session_scouting"]
+    if isinstance(raw.get("research"), bool):
+        s.research = raw["research"]
     if isinstance(raw.get("grok_model"), str) and MODEL_RE.match(raw["grok_model"]):
         s.grok_model = raw["grok_model"]
     return s
@@ -88,7 +91,7 @@ def _apply(s, raw):
 def save_settings(data_dir, changes):
     current = dataclasses.asdict(load_settings(data_dir))
     s = _apply(Settings(**{**current, "whitelist": tuple(current["whitelist"])}), changes)
-    keep = {k: getattr(s, k) for k in list(EDITABLE) + ["grok_model", "session_scouting"]}
+    keep = {k: getattr(s, k) for k in list(EDITABLE) + ["grok_model", "session_scouting", "research"]}
     with open(_settings_path(data_dir), "w", encoding="utf-8") as f:
         json.dump(keep, f)
     return s
@@ -140,8 +143,9 @@ def _iso(ts):
 
 
 class Engine:
-    def __init__(self, account, market, scout, notifier, settings_fn, clock=time.time):
+    def __init__(self, account, market, scout, notifier, settings_fn, clock=time.time, research=None):
         self.account, self.market, self.scout, self.notifier = account, market, scout, notifier
+        self.research = research
         self.settings, self.clock = settings_fn, clock
         self.cycle_lock = threading.Lock()
         self.stop_event, self.wake = threading.Event(), threading.Event()
@@ -318,6 +322,17 @@ class Engine:
             self._error("scout skipped: not enough candle data")
             self.account.log_scout(now, False, False, 0, "not enough candle data")
             return [], [], "not enough candle data"
+        if s.research and self.research is not None:
+            try:
+                r = self.research.digest(now)
+            except Exception as e:  # research must never stop scouting
+                r = None
+                self._error("research crashed (%s)" % type(e).__name__)
+            if r is not None and r.ok and r.text:
+                brief["fundamentals"] = {"retrieved_utc": _iso(now), "untrusted_digest": r.text}
+                self.account.set_meta("last_digest", json.dumps({"ts": now, "text": r.text, "sources": r.sources}))
+            elif r is not None:
+                self._error(r.error or "research returned nothing")
         res = self.scout.propose(brief, now)
         self.account.set_meta("last_scout_ts", now)
         self.account.log_scout(now, True, res.ok, len(res.proposals), res.error or res.note)
@@ -363,6 +378,12 @@ class Engine:
         return None
 
     # ------------------------------------------------------------ for the page
+    def _digest(self):
+        try:
+            return json.loads(self.account.get_meta("last_digest") or "null")
+        except ValueError:
+            return None
+
     def status(self):
         now, s = self.clock(), self.settings()
         bids, rows = self.last_bids, []
@@ -376,7 +397,7 @@ class Engine:
                 "decisions": self.account.recent_decisions(25), "last_scout": self.account.last_scout(),
                 "scout_calls_today": self.account.scout_calls_today(now), "last_cycle": self.last,
                 "session": session_at(now)[0], "scout_interval": scout_interval_minutes(now, s),
-                "errors": list(self.errors), "settings": dataclasses.asdict(s)}
+                "errors": list(self.errors), "settings": dataclasses.asdict(s), "digest": self._digest()}
 
 
 def build_engine(store):
@@ -384,4 +405,5 @@ def build_engine(store):
     account = PaperAccount(os.path.join(store.dir, "ledger.db"), settings_fn().paper_equity)
     scout = GrokScout(lambda: store.get("grok_key"), lambda: settings_fn().grok_model,
                       lambda: settings_fn().whitelist, lambda: settings_fn().max_hold_hours)
-    return Engine(account, KrakenMarket(), scout, TelegramNotifier(store), settings_fn)
+    research = GrokResearch(lambda: store.get("grok_key"), lambda: settings_fn().grok_model)
+    return Engine(account, KrakenMarket(), scout, TelegramNotifier(store), settings_fn, research=research)
