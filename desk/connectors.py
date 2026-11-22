@@ -103,6 +103,21 @@ def grok_test(key):
     return _res(True, "Grok key works. %d model(s) available, e.g. %s." % (len(ids), ", ".join(ids[:4])))
 
 
+# ------------------------------------------------------------------ FRED
+def fred_test(key):
+    if not key:
+        return _res(False, "Enter and save the FRED API key first (free at fredaccount.stlouisfed.org).")
+    if not re.match(r"^[a-z0-9]{32}$", key):
+        return _res(False, "A FRED API key is 32 lowercase letters and digits. Copy it again.")
+    try:
+        status, data = http_json("GET", "https://api.stlouisfed.org/fred/series?series_id=CPIAUCNS&api_key=%s&file_type=json" % key)
+    except net.NetError as e:
+        return _res(False, "FRED test: %s" % e)
+    if status == 200 and isinstance(data, dict) and data.get("seriess"):
+        return _res(True, "FRED key works. Macro data and the CPI / jobs / PPI release calendar will be downloaded.")
+    return _res(False, "FRED rejected the key (HTTP %s)." % status)
+
+
 # -------------------------------------------------------------- Telegram
 def _tg(token, method, params=None):
     body = json.dumps(params or {}).encode()
