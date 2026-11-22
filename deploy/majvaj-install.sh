@@ -9,6 +9,14 @@ set -euo pipefail
 IMAGE="freqtradeorg/freqtrade:stable_freqai"
 FT=/opt/majvaj/ft; UD=$FT/user_data; MV=$UD/majvaj; ETC=/etc/majvaj; CFG=$ETC/majvaj.json
 
+# Always run the newest installer: fetch it from GitHub, then hand over to it once.
+if [ "${MAJVAJ_FRESH:-}" != 1 ]; then
+  python3 -c "import urllib.request as u; open('/root/.majvaj-install.new','w').write(u.urlopen('https://raw.githubusercontent.com/vjmichael/desk/main/deploy/majvaj-install.sh').read().decode())" \
+    && bash -n /root/.majvaj-install.new && mv /root/.majvaj-install.new /root/majvaj-install.sh \
+    && MAJVAJ_FRESH=1 exec bash /root/majvaj-install.sh "$@"
+  echo "   Could not fetch the newest installer; continuing with this copy."
+fi
+
 echo "== 1/8 Desk (code from GitHub)"
 python3 -c "import urllib.request as u; open('/root/setup.sh','w').write(u.urlopen('https://raw.githubusercontent.com/vjmichael/desk/main/deploy/setup.sh').read().decode())"
 bash /root/setup.sh >/dev/null
@@ -144,7 +152,8 @@ echo "== 8/8 Check"
 sleep 20
 for u in desk majvaj-freqtrade majvaj-watchdog.timer; do printf '   %-24s %s\n' "$u" "$(systemctl is-active $u)"; done
 echo
-echo "Done. The bot is training its model on startup (several minutes) and needs a fresh Grok verdict"
+echo "Done. If the strategy did not change, the bot reuses its saved model and is up in about a minute."
+echo "If it changed, it trains a new model first (a few minutes). It also needs a fresh Grok verdict"
 echo "before it may open trades. Watch it on the Desk page -> 'Maj Vaj trading bot'."
 echo "Update later by running this same script again."
 echo "Live trading stays locked until its readiness checks pass. To prepare it later (as root):"
