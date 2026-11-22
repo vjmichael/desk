@@ -56,7 +56,13 @@ def main():
             webbrowser.open(url)
         except Exception:
             pass
-    if args.resume:
+    if majvaj is not None:
+        # Maj Vaj (Freqtrade) is the trading system now; the old Desk paper engine stays off.
+        try:
+            server.engine.account.set_meta("wanted_running", "0")
+        except Exception:
+            pass
+    elif args.resume:
         try:
             if server.engine.resume():
                 print("Resumed paper trading.")
