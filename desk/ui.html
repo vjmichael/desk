@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Desk: connections</title>
+<style>
+ body{font:16px/1.5 system-ui,sans-serif;max-width:760px;margin:24px auto;padding:0 16px;color:#222}
+ h1{font-size:22px} h2{font-size:17px;margin:0 0 4px}
+ .card{border:1px solid #ccc;border-radius:8px;padding:14px 16px;margin:14px 0}
+ label{display:block;margin:8px 0 2px;font-size:14px;color:#444}
+ input{width:100%;box-sizing:border-box;padding:8px;font:inherit;border:1px solid #aaa;border-radius:6px}
+ button{padding:8px 14px;margin:10px 8px 0 0;font:inherit;border:1px solid #666;border-radius:6px;background:#f4f4f4;cursor:pointer}
+ .saved{font-size:13px;color:#2a7a2a} .notsaved{font-size:13px;color:#a05a00}
+ .res{margin-top:8px;font-size:14px;padding:8px;border-radius:6px;display:none}
+ .ok{background:#e6f4e6;display:block} .bad{background:#fbe9e7;display:block}
+ .note{font-size:14px;color:#555}
+</style></head><body>
+<h1>Desk: connections <small id="ver" style="font-size:13px;color:#777;font-weight:normal"></small></h1>
+<p class="note">Keys are stored only in this computer's <code>data</code> folder and are never shown again or sent anywhere except to the service they belong to. Leave a field empty to keep what is already saved.
+Paper trading needs no trading permission: create the Kraken key with <b>Query funds only</b> and <b>no withdrawals</b>.</p>
+<p><a id="paperlink" href="#">Paper trading &rarr;</a></p>
+<div id="app"></div>
+<script>
+const TOKEN=new URLSearchParams(location.search).get('t')||'';
+const SECTIONS=[
+ {id:'kraken',title:'Kraken',fields:[['kraken_key','API key'],['kraken_secret','API secret']],
+  tests:[['kraken_public','Test public data'],['kraken_private','Test my key']]},
+ {id:'grok',title:'Grok (xAI)',fields:[['grok_key','API key']],tests:[['grok','Test key']]},
+ {id:'tgd',title:'Telegram: Desk bot (reports)',fields:[['telegram_desk_token','Bot token'],['telegram_desk_chat_id','Your chat ID (optional, found automatically)']],
+  tests:[['telegram_desk','Test bot']],find:'desk'},
+ {id:'tgr',title:'Telegram: Recovery bot (alerts)',fields:[['telegram_recovery_token','Bot token'],['telegram_recovery_chat_id','Your chat ID (optional, found automatically)']],
+  tests:[['telegram_recovery','Test bot']],find:'recovery'}];
+async function api(path,body){
+  const ctl=new AbortController();const timer=setTimeout(()=>ctl.abort(),60000);
+  try{
+    const r=await fetch('/api/'+path,{method:body?'POST':'GET',headers:{'X-Desk-Token':TOKEN,'Content-Type':'application/json'},body:body?JSON.stringify(body):undefined,signal:ctl.signal});
+    return await r.json();
+  }catch(e){
+    return {ok:false,message:e.name==='AbortError'?'No answer after 60 seconds. Check the terminal window for an error message.':'The app did not answer. Is the terminal window still running it? Look there for an error message.'};
+  }finally{clearTimeout(timer);}
+}
+function show(id,res){const e=document.getElementById('res-'+id);e.textContent=res.message||res.error||'No answer';e.className='res '+(res.ok?'ok':'bad');}
+async function refresh(){
+  const st=await api('status');
+  if(!st.saved)return;
+  document.getElementById('ver').textContent='version '+(st.version||'unknown');
+  for(const s of SECTIONS)for(const [f] of s.fields){
+    const e=document.getElementById('st-'+f);
+    e.textContent=st.saved[f]?'saved':'not saved';e.className=st.saved[f]?'saved':'notsaved';}
+}
+async function save(sec){
+  const v={};for(const [f] of sec.fields){const i=document.getElementById('in-'+f);if(i.value.trim()){v[f]=i.value.trim();}}
+  if(!Object.keys(v).length){show(sec.id,{ok:false,message:'Nothing to save: all fields are empty.'});return;}
+  const r=await api('save',{values:v});
+  for(const [f] of sec.fields)document.getElementById('in-'+f).value='';
+  show(sec.id,{ok:r.ok,message:r.ok?'Saved. Now press a Test button.':(r.error||'Save failed')});refresh();
+}
+async function test(sec,name){show(sec.id,{ok:true,message:'Testing...'});show(sec.id,await api('test/'+name,{}));}
+async function find(sec){const r=await api('find_chat/'+sec.find,{});show(sec.id,r);refresh();}
+document.getElementById('paperlink').href='/paper?t='+encodeURIComponent(TOKEN);
+document.getElementById('app').innerHTML='';
+for(const sec of SECTIONS){
+  const d=document.createElement('div');d.className='card';
+  d.innerHTML='<h2>'+sec.title+'</h2>'+sec.fields.map(([f,l])=>
+   '<label for="in-'+f+'">'+l+' <span id="st-'+f+'"></span></label><input id="in-'+f+'" type="password" autocomplete="off" placeholder="paste here">').join('')+
+   '<div><button data-a="save">Save</button>'+sec.tests.map(([n,l])=>'<button data-a="test" data-n="'+n+'">'+l+'</button>').join('')+
+   ''+'</div><div id="res-'+sec.id+'" class="res"></div>';
+  d.addEventListener('click',e=>{const a=e.target.dataset.a;if(!a)return;
+    if(a==='save')save(sec);else if(a==='test')test(sec,e.target.dataset.n);else if(a==='find')find(sec);});
+  document.getElementById('app').appendChild(d);
+}
+refresh();
+</script></body></html>

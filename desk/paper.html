@@ -1,0 +1,148 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Desk - Paper trading</title>
+<style>
+:root{--bg:#f6f7f9;--fg:#1b1f24;--mut:#667;--card:#fff;--line:#d9dde3;--ok:#0a7d33;--bad:#b3261e;--acc:#1f5fd1}
+@media(prefers-color-scheme:dark){:root{--bg:#14171b;--fg:#e8eaed;--mut:#9aa3ad;--card:#1d2127;--line:#2f353d;--ok:#4cc97a;--bad:#ff7b72;--acc:#6ea1ff}}
+body{margin:0;padding:16px;background:var(--bg);color:var(--fg);font:15px/1.45 system-ui,Segoe UI,sans-serif}
+main{max-width:980px;margin:0 auto}
+h1{font-size:20px;margin:0 0 4px}h2{font-size:15px;margin:0 0 8px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:12px 14px;margin:12px 0}
+.row{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px}
+.stat b{display:block;font-size:20px}.stat span,.mut{color:var(--mut);font-size:13px}
+button{font:inherit;padding:6px 12px;border:1px solid var(--line);border-radius:6px;background:var(--card);color:var(--fg);cursor:pointer}
+button.go{background:var(--acc);border-color:var(--acc);color:#fff}
+button:disabled{opacity:.5;cursor:default}
+table{width:100%;border-collapse:collapse;font-size:13px}
+th,td{text-align:left;padding:4px 6px;border-bottom:1px solid var(--line);vertical-align:top}
+.wrap{overflow-x:auto}
+.ok{color:var(--ok)}.bad{color:var(--bad)}
+input{font:inherit;padding:5px 7px;border:1px solid var(--line);border-radius:6px;background:var(--bg);color:var(--fg);width:90px}
+input.wide{width:150px}
+#msg{min-height:1.3em;margin:6px 0}
+.badge{display:inline-block;padding:1px 8px;border-radius:10px;font-size:12px;border:1px solid var(--line)}
+</style></head><body><main>
+<h1>Paper trading <span id="state" class="badge">...</span></h1>
+<p class="mut">Simulated money only. Real Kraken prices, real Grok ideas, no real orders. <a id="back" href="/">&larr; Keys</a> &middot; <span id="ver"></span></p>
+
+<div class="card"><div class="row">
+<button class="go" id="start">Start</button><button id="stop">Stop</button><button id="scout">Scout now</button>
+<span class="mut" id="cycle"></span><span class="mut" id="sess"></span></div><div id="msg"></div></div>
+
+<div class="card"><div class="stats">
+<div class="stat"><b id="equity">-</b><span>Equity (USD)</span></div>
+<div class="stat"><b id="pnl">-</b><span>Profit/loss since reset</span></div>
+<div class="stat"><b id="cash">-</b><span>Cash</span></div>
+<div class="stat"><b id="calls">-</b><span>Scout calls today</span></div></div></div>
+
+<div class="card"><h2>Open positions</h2><div class="wrap"><table id="open"></table></div></div>
+<div class="card"><h2>Latest scout</h2><div id="lastscout" class="mut">-</div></div>
+<div class="card"><h2>Recent decisions (Gate)</h2><div class="wrap"><table id="dec"></table></div></div>
+<div class="card"><h2>Closed trades</h2><div class="wrap"><table id="closed"></table></div></div>
+<div class="card"><h2>Problems</h2><div id="errs" class="mut">None</div></div>
+
+<div class="card"><h2>History and backtest</h2>
+<p class="mut">Replays a fixed rules strategy over past Kraken hourly candles with the same Gate, fees and exits. It does not replay Grok (Grok's past answers can't be tested without peeking at the future). Settings are chosen on the first 70% of the history and scored once on the last 30%.</p>
+<div class="row"><button id="hdl">Download history</button><button id="hbt">Run backtest</button><span id="hmsg" class="mut"></span></div>
+<div id="hpairs" class="mut" style="margin:8px 0"></div><div id="hres"></div></div>
+
+<div class="card"><h2>Settings</h2><div class="row">
+<label>Scout every (min) <input id="s_scout" type="number"></label>
+<label>Check every (min) <input id="s_cycle" type="number"></label>
+<label>Max scout calls/day <input id="s_max" type="number"></label>
+<label><input id="s_sess" type="checkbox" style="width:auto"> Scout by market session</label>
+<label>Grok model <input id="s_model" class="wide"></label>
+<button id="save">Save settings</button></div>
+<p class="mut">Changes apply on the next cycle.</p></div>
+
+<div class="card"><h2>Reset paper account</h2><div class="row">
+<label>Starting equity (USD) <input id="eq" type="number" value="1000"></label>
+<button id="reset">Reset (stop first)</button></div>
+<p class="mut">Clears all positions, decisions and history.</p></div>
+
+<script>
+const TOKEN=new URLSearchParams(location.search).get('t')||'';
+document.getElementById('back').href='/?t='+encodeURIComponent(TOKEN);
+const $=id=>document.getElementById(id);
+const esc=s=>String(s==null?'':s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const money=n=>n==null?'-':Number(n).toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2});
+const price=n=>n==null?'-':Number(n).toLocaleString(undefined,{maximumFractionDigits:6});
+const when=t=>t?new Date(t*1000).toLocaleString():'-';
+async function api(path,body){
+  const ctl=new AbortController(),timer=setTimeout(()=>ctl.abort(),60000);
+  try{
+    const r=await fetch('/api/paper/'+path,{method:body?'POST':'GET',headers:{'X-Desk-Token':TOKEN,'Content-Type':'application/json'},body:body?JSON.stringify(body):undefined,signal:ctl.signal});
+    return await r.json();
+  }catch(e){return {ok:false,message:'The app did not answer. Is the terminal window still running it?'};}
+  finally{clearTimeout(timer);}
+}
+function say(r){const m=$('msg');m.textContent=r.message||r.error||'';m.className=r.ok?'ok':'bad';}
+function table(el,head,rows){
+  el.innerHTML='<tr>'+head.map(h=>'<th>'+h+'</th>').join('')+'</tr>'+
+    (rows.length?rows.map(r=>'<tr>'+r.map(c=>'<td>'+c+'</td>').join('')+'</tr>').join(''):'<tr><td colspan="'+head.length+'" class="mut">None yet</td></tr>');
+}
+let formFilled=false;
+async function refresh(){
+  const s=await api('status');
+  if(!s.ok){ $('state').textContent='no answer'; if(s.error==='bad token')say({ok:false,message:'Open this page from the keys page link (the address needs its token).'}); return;}
+  $('ver').textContent='version '+s.version;
+  $('state').textContent=s.running?'running':'stopped';
+  $('state').className='badge '+(s.running?'ok':'');
+  $('equity').textContent=money(s.equity);
+  const p=$('pnl');p.textContent=(s.pnl>=0?'+':'')+money(s.pnl);p.className=s.pnl>=0?'ok':'bad';
+  $('cash').textContent=money(s.cash);
+  $('calls').textContent=s.scout_calls_today+' / '+s.settings.max_scout_calls_per_day;
+  $('cycle').textContent=s.last_cycle&&s.last_cycle.ts?'Last check: '+when(s.last_cycle.ts):'';
+  $('sess').textContent=' · Session: '+s.session+' (scout every '+s.scout_interval+' min)';
+  $('start').disabled=s.running;$('stop').disabled=!s.running;$('scout').disabled=!s.running;$('reset').disabled=s.running;
+  table($('open'),['Pair','Qty','Entry','Stop','Target','Now','Unrealized','Expires'],
+    s.open.map(o=>[esc(o.symbol),price(o.qty),price(o.entry),price(o.stop),price(o.target),price(o.mark),
+      o.unrealized==null?'-':'<span class="'+(o.unrealized>=0?'ok':'bad')+'">'+money(o.unrealized)+'</span>',when(o.expires_at)]));
+  const ls=s.last_scout;
+  $('lastscout').textContent=ls?when(ls.ts)+' - '+(ls.called?(ls.ok?'Grok answered, '+ls.n_proposals+' idea(s)':'Grok call failed'):'not called')+(ls.note?' ('+ls.note+')':''):'The scout has not run yet.';
+  table($('dec'),['Time','Pair','Result','Reason'],
+    s.decisions.map(d=>[when(d.ts),esc(d.symbol),d.approved?'<span class="ok">opened</span>':'<span class="bad">rejected</span>',esc(d.reason)]));
+  table($('closed'),['Closed','Pair','Entry','Exit','Why','P/L'],
+    s.closed.map(c=>[when(c.closed_at),esc(c.symbol),price(c.entry),price(c.exit_price),esc(c.exit_reason),
+      '<span class="'+(c.pnl>=0?'ok':'bad')+'">'+money(c.pnl)+'</span>']));
+  $('errs').innerHTML=s.errors.length?s.errors.slice(-8).map(e=>'<div class="bad">'+esc(typeof e==='string'?e:when(e.ts)+' - '+e.message)+'</div>').join(''):'None';
+  if(!formFilled){formFilled=true;$('s_scout').value=s.settings.scout_minutes;$('s_cycle').value=s.settings.cycle_minutes;
+    $('s_max').value=s.settings.max_scout_calls_per_day;$('s_model').value=s.settings.grok_model;$('s_sess').checked=s.settings.session_scouting;}
+}
+async function act(name,body){say({ok:true,message:'Working...'});say(await api(name,body||{}));refresh();}
+$('start').onclick=()=>act('start');$('stop').onclick=()=>act('stop');$('scout').onclick=()=>act('scout_now');
+$('reset').onclick=()=>{if(confirm('Erase all paper history and start over?'))act('reset',{equity:parseFloat($('eq').value)});};
+$('save').onclick=()=>act('settings',{scout_minutes:parseFloat($('s_scout').value),cycle_minutes:parseFloat($('s_cycle').value),
+  max_scout_calls_per_day:parseInt($('s_max').value,10),grok_model:$('s_model').value.trim(),session_scouting:$('s_sess').checked});
+refresh();setInterval(refresh,5000);
+const pct=n=>n==null?'-':(n>=0?'+':'')+Number(n).toFixed(1)+'%';
+const day=t=>t?new Date(t*1000).toLocaleDateString():'-';
+async function hapi(path,body){
+  try{const r=await fetch('/api/history/'+path,{method:body?'POST':'GET',headers:{'X-Desk-Token':TOKEN,'Content-Type':'application/json'},body:body?JSON.stringify(body):undefined});return await r.json();}
+  catch(e){return {ok:false,message:'The app did not answer.'};}
+}
+function block(title,r){
+  return '<tr><td>'+title+'</td><td>'+r.trades+'</td><td>'+(r.win_rate==null?'-':r.win_rate.toFixed(0)+'%')+'</td><td class="'+(r.return_pct>=0?'ok':'bad')+'">'+pct(r.return_pct)+'</td><td>'+pct(r.buy_hold_pct)+'</td><td>-'+r.max_drawdown_pct.toFixed(1)+'%</td><td>'+day(r.from)+' to '+day(r.to)+'</td></tr>';
+}
+let lastRes=null;
+async function hrefresh(){
+  const h=await hapi('status');if(!h.ok)return;
+  const j=h.job;$('hmsg').textContent=j.message?(j.running?'Working: ':(j.ok===false?'Problem: ':''))+j.message:'';
+  $('hmsg').className=j.ok===false?'bad':'mut';$('hdl').disabled=$('hbt').disabled=j.running;
+  $('hpairs').textContent=Object.entries(h.pairs).map(([k,v])=>k+': '+(v.rows?v.rows.toLocaleString()+' candles, '+day(v.first)+' to '+day(v.last):'none')).join('   |   ');
+  const r=h.result;if(!r){$('hres').innerHTML='';lastRes=null;return;}
+  if(lastRes===r.made_at)return;lastRes=r.made_at;
+  const g=r.grid.map(x=>'<tr><td>'+x.stop_atr+'</td><td>'+x.target_atr+'</td><td>'+x.trades+'</td><td>'+(x.win_rate==null?'-':x.win_rate.toFixed(0)+'%')+'</td><td class="'+(x.return_pct>=0?'ok':'bad')+'">'+pct(x.return_pct)+'</td></tr>').join('');
+  const sess=Object.entries(r.test.by_session).map(([k,v])=>'<tr><td>'+esc(k)+'</td><td>'+v.trades+'</td><td>'+(v.trades?(v.wins/v.trades*100).toFixed(0)+'%':'-')+'</td><td class="'+(v.pnl>=0?'ok':'bad')+'">'+money(v.pnl)+'</td></tr>').join('');
+  const beat=r.test.return_pct>(r.test.buy_hold_pct==null?-1e9:r.test.buy_hold_pct);
+  $('hres').innerHTML='<table><tr><th>Period</th><th>Trades</th><th>Win rate</th><th>Strategy</th><th>Buy and hold</th><th>Worst drop</th><th>Dates</th></tr>'+block('Picked on (70%)',r.train)+block('Not seen (30%)',r.test)+'</table>'+
+   '<p>'+(r.test.return_pct>0?'On data it had not seen, the rules made money':'On data it had not seen, the rules lost money')+' ('+pct(r.test.return_pct)+') and '+(beat?'beat':'did not beat')+' simply holding ('+pct(r.test.buy_hold_pct)+'). Best settings: stop '+r.best.stop_atr+' x ATR, target '+r.best.target_atr+' x ATR.</p>'+
+   '<details><summary>All settings tried (first 70% only)</summary><table><tr><th>Stop (ATR)</th><th>Target (ATR)</th><th>Trades</th><th>Win rate</th><th>Return</th></tr>'+g+'</table></details>'+
+   '<details><summary>Results by market session (unseen 30%)</summary><table><tr><th>Session at entry</th><th>Trades</th><th>Win rate</th><th>Profit/loss</th></tr>'+sess+'</table></details>';
+}
+$('hdl').onclick=async()=>{say(await hapi('download',{}));hrefresh();};
+$('hbt').onclick=async()=>{say(await hapi('backtest',{}));hrefresh();};
+hrefresh();setInterval(hrefresh,4000);
+
+</script></main></body></html>
