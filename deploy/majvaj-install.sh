@@ -79,6 +79,12 @@ else
 fi
 
 echo "== 7/8 Services"
+# Size the bot to this machine: leave half a CPU and 1.5 GB for Desk and the system.
+CPUS=$(python3 -c "import os; print(max(1.0, (os.cpu_count() or 1) - 0.5))")
+MEM=$(python3 -c "import os; t=os.sysconf('SC_PAGE_SIZE')*os.sysconf('SC_PHYS_PAGES')/2**20; print('%dm' % max(1024, min(5120, t-1536)))")
+JOBS=$(python3 -c "import os; print(max(1, (os.cpu_count() or 1)))")
+python3 -c "import json,sys; p=sys.argv[1]; c=json.load(open(p)); c['freqai']['model_training_parameters']['n_jobs']=int(sys.argv[2]); json.dump(c,open(p,'w'),indent=4)" "$UD/config-4h.json" "$JOBS"
+echo "   bot limits: $CPUS CPUs, $MEM memory, $JOBS training threads"
 cat > /etc/systemd/system/majvaj-freqtrade.service <<UNIT
 [Unit]
 Description=Maj Vaj trading bot (Freqtrade + FreqAI, dry-run)
@@ -90,7 +96,7 @@ StartLimitBurst=6
 
 [Service]
 ExecStartPre=-/usr/bin/docker rm -f majvaj-ft
-ExecStart=/usr/bin/docker run --rm --name majvaj-ft --memory 5g --cpus 3 -p 127.0.0.1:8080:8080 \\
+ExecStart=/usr/bin/docker run --rm --name majvaj-ft --memory $MEM --cpus $CPUS -p 127.0.0.1:8080:8080 \\
   -v $UD:/freqtrade/user_data $DIGEST trade \\
   --config /freqtrade/user_data/config-4h.json --config /freqtrade/user_data/config.private.json \\
   --strategy MajVajFreqAI4h --freqaimodel LightGBMRegressor \\
@@ -127,6 +133,7 @@ UNIT
 systemctl daemon-reload
 systemctl restart desk
 systemctl enable majvaj-freqtrade >/dev/null 2>&1
+systemctl reset-failed majvaj-freqtrade 2>/dev/null || true
 systemctl restart majvaj-freqtrade
 systemctl enable --now majvaj-watchdog.timer >/dev/null 2>&1
 
