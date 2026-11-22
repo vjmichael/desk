@@ -224,6 +224,8 @@ class VerdictService:
                 except Exception as e:  # never let the loop die; details stay out of logs
                     self.failures += 1
                     with self.lock:
-                        self.db.execute("INSERT INTO verdicts(ts,ok,error) VALUES(?,0,?)", (now, "crashed (%s)" % type(e).__name__))
+                        where = getattr(e, "filename", None)  # file errors name the file; no secrets in paths
+                        self.db.execute("INSERT INTO verdicts(ts,ok,error) VALUES(?,0,?)",
+                                        (now, "crashed (%s%s)" % (type(e).__name__, (": %s" % where) if where else "")))
                         self.db.commit()
             self.stop_event.wait(60)
