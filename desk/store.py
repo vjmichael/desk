@@ -5,7 +5,7 @@ import os
 import tempfile
 
 SECRET_FIELDS = (
-    "kraken_key", "kraken_secret", "grok_key", "fred_key",
+    "kraken_key", "kraken_secret", "kraken_trade_key", "kraken_trade_secret", "grok_key", "fred_key",
     "telegram_desk_token", "telegram_desk_chat_id",
     "telegram_recovery_token", "telegram_recovery_chat_id",
 )
