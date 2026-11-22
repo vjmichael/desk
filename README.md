@@ -1,4 +1,20 @@
-# Desk (stage 1)
+# Maj Vaj / Desk
+
+**Maj Vaj** is a 24/7 paper-trading desk: Freqtrade + FreqAI places the (paper) orders, Grok checks news and X
+sentiment and issues a verdict, and your money rules cap everything. **Desk** is its front door: keys, web page,
+Telegram reports. Install or update on a Debian server with `deploy/majvaj-install.sh` (as root).
+
+## Maj Vaj safety rules (enforced inside the bot's sizing)
+- Only the authorized bankroll is ever at risk; the rest of the account is never used.
+- Winning trades' net profit is protected and never traded again; losses reduce the active bankroll.
+- Daily loss limit; optional daily goal: stop (default), keep trading, or opportunity mode (careful extra trades in
+  chosen sessions, one at a time, smaller, stronger signal, NORMAL verdict, never giving back more than you allow).
+- Grok verdict: stand down blocks new entries, caution halves size, an expired or missing verdict blocks.
+- Any fault in these checks refuses the trade (fail closed). Open trades are always managed.
+- Watchdog every 2 minutes: restarts stuck services (max 3 an hour), alerts via the Recovery bot, optional outside
+  heartbeat; Recovery bot commands /status /pause /resume /restart. Nothing can move money or change limits.
+
+## Desk (original key screen and legacy paper engine)
 
 Enter your keys, test every connection, and hold the loosened paper-mode Gate.
 Nothing here places an order. Live trading is not enabled in this build.

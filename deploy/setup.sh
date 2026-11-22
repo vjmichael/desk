@@ -21,6 +21,9 @@ rm -rf "$APP/desk" "$APP/tests"
 cp -r "$SRC/desk" "$APP/desk"
 cp -r "$SRC/tests" "$APP/tests"
 cp "$SRC/README.md" "$APP/README.md"
+rm -rf "$APP/deploy" "$APP/freqtrade"
+cp -r "$SRC/deploy" "$APP/deploy"
+cp -r "$SRC/freqtrade" "$APP/freqtrade"
 rm -rf "$TMP"
 chown -R root:root "$APP"
 
@@ -33,12 +36,14 @@ Wants=network-online.target
 [Service]
 User=desk
 WorkingDirectory=$APP
-ExecStart=/usr/bin/python3 -m desk --no-browser --port 8765 --data-dir $DATA --token-file $DATA/token --resume
+ExecStart=/usr/bin/python3 -m desk --no-browser --port 8765 --data-dir $DATA --token-file $DATA/token --resume --majvaj-config /etc/majvaj/majvaj.json
 Restart=always
 RestartSec=5
 NoNewPrivileges=true
 ProtectSystem=strict
 ReadWritePaths=$DATA
+ReadWritePaths=-/opt/majvaj/ft/user_data/majvaj
+MemoryMax=768M
 PrivateTmp=true
 
 [Install]
