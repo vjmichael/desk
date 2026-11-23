@@ -272,6 +272,22 @@ class MajVajFreqAI(IStrategy):
     # costs are about 0.52% round trip on Kraken taker fees, so demand clearly more than that
     entry_threshold = 0.012
 
+    # ---------------------------------------------------------------- settings from the Desk page
+    # Stop loss, take profit, time exit and the look-ahead come from the config layer the Desk writes
+    # (majvaj/config.strategy.json). The two below are read here. A bad value falls back to the built-in default.
+    def _threshold(self):
+        """Average rise the model must predict before the bot buys (a fraction, 0.03 = 3%)."""
+        try:
+            v = float(self.config.get("majvaj_entry_threshold", self.entry_threshold))
+        except (TypeError, ValueError):
+            return self.entry_threshold
+        return v if 0.001 <= v <= 0.5 else self.entry_threshold
+
+    def _trend_filter(self):
+        """True: buy only while the daily price is above its 50-day average (used by the 4-hour version)."""
+        v = self.config.get("majvaj_trend_filter", True)
+        return v if isinstance(v, bool) else True
+
     def feature_engineering_expand_all(self, dataframe: DataFrame, period: int, metadata: dict, **kwargs) -> DataFrame:
         dataframe["%-rsi-period"] = ta.RSI(dataframe, timeperiod=period)
         dataframe["%-mfi-period"] = ta.MFI(dataframe, timeperiod=period)
@@ -328,7 +344,7 @@ class MajVajFreqAI(IStrategy):
         return self.freqai.start(dataframe, metadata, self)
 
     def populate_entry_trend(self, df: DataFrame, metadata: dict) -> DataFrame:
-        conditions = [df["do_predict"] == 1, df["&-s_close"] > self.entry_threshold, df["volume"] > 0]
+        conditions = [df["do_predict"] == 1, df["&-s_close"] > self._threshold(), df["volume"] > 0]
         df.loc[reduce(lambda a, b: a & b, conditions), ["enter_long", "enter_tag"]] = (1, "model")
         return df
 
@@ -404,7 +420,7 @@ class MajVajFreqAI(IStrategy):
         df, _ = self.dp.get_analyzed_dataframe(pair, self.timeframe)
         if df is None or df.empty or "&-s_close" not in df:
             return False
-        return float(df["&-s_close"].iloc[-1]) >= self.entry_threshold * OPPORTUNITY_SIGNAL_FACTOR
+        return float(df["&-s_close"].iloc[-1]) >= self._threshold() * OPPORTUNITY_SIGNAL_FACTOR
 
     def custom_stake_amount(self, pair: str, current_time: datetime, current_rate: float, proposed_stake: float,
                             min_stake, max_stake: float, leverage: float, entry_tag, side: str, **kwargs) -> float:

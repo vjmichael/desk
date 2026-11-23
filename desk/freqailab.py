@@ -17,6 +17,7 @@ import zipfile
 from datetime import datetime, timedelta, timezone
 
 from .pairs import UNIT as PAIRS_UNIT, applied, refresh_data_script
+from .strategysettings import effective_identifier
 
 RANGES = {"3m": ("Last 3 months", 91), "6m": ("Last 6 months", 182), "12m": ("Last 12 months", 365),
           "24m": ("Last 2 years", 730)}
@@ -28,6 +29,7 @@ def paths(user_data):
     return {"ud": user_data, "mv": mv, "request": os.path.join(mv, "backtest_request.json"),
             "state": os.path.join(mv, "backtest_state.json"), "exit": os.path.join(mv, "backtest_exit"),
             "override": os.path.join(mv, "backtest_override.json"), "config": os.path.join(user_data, "config-4h.json"),
+            "layer": os.path.join(mv, "config.strategy.json"),
             "results": os.path.join(user_data, "backtest_results"), "models": os.path.join(user_data, "models")}
 
 
@@ -47,6 +49,42 @@ def _write(path, obj):
     os.replace(tmp, path)
 
 
+def _run_settings(zip_path, st):
+    """The coins and strategy numbers a backtest ran with, from the result file itself."""
+    cfg = {}
+    try:
+        with zipfile.ZipFile(zip_path) as z:
+            name = next((n for n in z.namelist() if n.endswith("_config.json")), None)
+            if name:
+                cfg = json.loads(z.read(name))
+    except Exception:
+        cfg = {}
+    pairs = st.get("pairlist") or (cfg.get("exchange") or {}).get("pair_whitelist") or None
+    stop = st.get("stoploss", cfg.get("stoploss"))
+    roi = st.get("minimal_roi") or cfg.get("minimal_roi") or {}
+    parts = []
+    if cfg.get("majvaj_entry_threshold") is not None:
+        parts.append("buy >= %g%%" % round(cfg["majvaj_entry_threshold"] * 100, 3))
+    ahead = ((cfg.get("freqai") or {}).get("feature_parameters") or {}).get("label_period_candles")
+    if ahead:
+        parts.append("look-ahead %s" % ahead)
+    if cfg.get("majvaj_trend_filter") is not None:
+        parts.append("trend filter %s" % ("on" if cfg["majvaj_trend_filter"] else "off"))
+    if isinstance(stop, (int, float)):
+        parts.append("stop %g%%" % round(abs(stop) * 100, 3))
+    if isinstance(roi, dict) and roi:
+        try:
+            tp = roi.get("0")
+            late = max((int(k) for k, v in roi.items() if k != "0" and v == -1), default=None)
+            if tp is not None:
+                parts.append("take-profit %g%%" % round(tp * 100, 3))
+            if late:
+                parts.append("exit after %g h" % round(late / 60, 2))
+        except (TypeError, ValueError):
+            pass
+    return pairs, " · ".join(parts)
+
+
 def summarize(zip_path):
     """Headline numbers from one Freqtrade backtest result file."""
     with zipfile.ZipFile(zip_path) as z:
@@ -54,13 +92,15 @@ def summarize(zip_path):
         data = json.loads(z.read(name))
     st = next(iter(data["strategy"].values()))
     trades = st.get("total_trades") or 0
+    pairs, settings = _run_settings(zip_path, st)
     return {"file": os.path.basename(zip_path), "start": st.get("backtest_start"), "end": st.get("backtest_end"),
             "trades": trades, "wins": st.get("wins"), "losses": st.get("losses"),
             "profit_pct": round((st.get("profit_total") or 0) * 100, 2), "profit_usd": round(st.get("profit_total_abs") or 0, 2),
             "market_pct": round((st.get("market_change") or 0) * 100, 2),
             "max_drawdown_pct": round((st.get("max_drawdown_account") or 0) * 100, 2),
             "winrate_pct": round((st.get("winrate") or 0) * 100, 1), "model": st.get("freqai_identifier"),
-            "starting": st.get("starting_balance"), "final": st.get("final_balance")}
+            "starting": st.get("starting_balance"), "final": st.get("final_balance"),
+            "pairs": pairs, "settings": settings}
 
 
 class Lab:
@@ -72,13 +112,15 @@ class Lab:
     def model(self):
         cfg = _read(self.p["config"]) or {}
         fa = cfg.get("freqai") or {}
-        ident = fa.get("identifier")
+        layer_cfg = _read(self.p["layer"]) or {}
+        ident = effective_identifier(self.p["ud"])
         trained = None
         if ident:
             subs = glob.glob(os.path.join(self.p["models"], ident, "sub-train-*"))
             if subs:
                 trained = max(os.path.getmtime(s) for s in subs)
-        fp = fa.get("feature_parameters") or {}
+        fp = dict(fa.get("feature_parameters") or {})
+        fp.update(((layer_cfg.get("freqai") or {}).get("feature_parameters")) or {})
         return {"identifier": ident, "last_trained": trained, "retrain_hours": fa.get("live_retrain_hours"),
                 "train_days": fa.get("train_period_days"), "label_candles": fp.get("label_period_candles"),
                 "timeframes": fp.get("include_timeframes"), "pairs": applied(self.p["ud"]),
@@ -145,12 +187,14 @@ def tick(user_data, image, desk_history="/var/lib/desk/history.db", now=None, ru
     label, days = RANGES[req["range"]]
     start = (datetime.fromtimestamp(now, timezone.utc) - timedelta(days=days)).strftime("%Y%m%d")
     end = datetime.fromtimestamp(now, timezone.utc).strftime("%Y%m%d")   # FreqAI backtests need an end date
-    ident = ((_read(p["config"]) or {}).get("freqai") or {}).get("identifier") or "majvaj-4h"
+    ident = effective_identifier(user_data) or "majvaj-4h"
     _write(p["override"], {"freqai": {"identifier": ident + "-backtest"}})
     os.chown(p["override"], 1000, 1000)
     ud = user_data
     q = shlex.quote
     pairs_cfg = "--config /freqtrade/user_data/config.pairs.json " if os.path.exists(os.path.join(ud, "config.pairs.json")) else ""
+    if os.path.exists(p["layer"]):   # the strategy settings saved on the page: tested exactly as the bot would trade them
+        pairs_cfg += "--config /freqtrade/user_data/majvaj/config.strategy.json "
     script = " && ".join(refresh_data_script(ud, image, desk_history) + [
         "docker run --rm --name majvaj-backtest --cpus 1 --memory 2g -v %s:/freqtrade/user_data %s backtesting "
         "--config /freqtrade/user_data/config-4h.json %s--config /freqtrade/user_data/majvaj/backtest_override.json "

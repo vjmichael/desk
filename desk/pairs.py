@@ -19,6 +19,7 @@ import shlex
 import time
 
 from . import history, market, net
+from .strategysettings import effective_identifier
 
 LOCKED = ("BTC/USD", "ETH/USD")
 DEFAULT = ("BTC/USD", "ETH/USD", "SOL/USD")
@@ -91,8 +92,7 @@ def coins_text(data_dir):
 def trained_coins(user_data):
     """Coins FreqAI has a saved model for (sub-train-<COIN>_<time> folders of the current model), or None when this
     is not a Maj Vaj bot folder (no model name to look for). The strategy enforces the rule itself either way."""
-    cfg = _read(bot_paths(user_data)["base_config"]) or {}
-    ident = (cfg.get("freqai") or {}).get("identifier")
+    ident = effective_identifier(user_data)
     if not ident:
         return None
     out = set()

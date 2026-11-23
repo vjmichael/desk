@@ -252,6 +252,8 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send(200, mv.set_trading(bool(body.get("on")), body.get("confirm")))
             if action == "pairs":
                 return self._send(200, mv.pairs.apply(body.get("pairs"), mv.money(), self.server.research, mv.notifier.recovery))
+            if action == "strategy":
+                return self._send(200, mv.save_strategy(body))
             if action == "restart":
                 return self._send(200, mv.restart_request(str(body.get("what") or "")))
             if action == "backtest":

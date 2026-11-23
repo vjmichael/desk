@@ -70,6 +70,8 @@ if [ -n "${HEARTBEAT_URL:-}" ]; then
 fi
 # The coins the bot trades (chosen on the Desk's FreqAI tab; the watchdog rewrites this file on a change).
 [ -f "$UD/config.pairs.json" ] || python3 -c "import json,sys; c=json.load(open(sys.argv[1])); json.dump({'exchange': {'pair_whitelist': c['exchange']['pair_whitelist']}}, open(sys.argv[2],'w'))" "$UD/config-4h.json" "$UD/config.pairs.json"
+# Strategy settings chosen on the Desk's FreqAI tab (entry threshold, stop, take-profit, look-ahead). Desk rewrites this file.
+[ -f "$MV/config.strategy.json" ] || echo '{}' > "$MV/config.strategy.json"
 [ -f "$UD/config.mode.json" ] || echo '{"dry_run": true, "db_url": "sqlite:////freqtrade/user_data/tradesv3.dryrun.sqlite"}' > "$UD/config.mode.json"
 chown -R 1000:1000 "$UD"; chmod 600 "$UD/config.private.json" "$UD/config.mode.json"
 chown desk:1000 "$MV"; chmod 775 "$MV"   # Desk writes settings and verdicts here; the bot (uid 1000) writes its decision log
@@ -99,6 +101,9 @@ JOBS=$(python3 -c "import os; print(max(1, (os.cpu_count() or 1)))")
 # strategy update trains a fresh model instead of crashing on the old one ("different features").
 MODEL_ID="majvaj-4h-$(cat "$UD/strategies/"*.py | sha256sum | cut -c1-10)"
 python3 -c "import json,sys; p=sys.argv[1]; c=json.load(open(p)); c['freqai']['model_training_parameters']['n_jobs']=int(sys.argv[2]); c['freqai']['identifier']=sys.argv[3]; json.dump(c,open(p,'w'),indent=4)" "$UD/config-4h.json" "$JOBS" "$MODEL_ID"
+# A look-ahead chosen on the Desk page gives the model its own name (base name + -L<candles>). The base name changes
+# whenever the strategy code does, so recompute that suffix now, or a stale name would reuse a model that no longer fits.
+python3 -c "import json,os,sys; p=sys.argv[1]; c=json.load(open(p)) if os.path.exists(p) else {}; fa=c.setdefault('freqai',{}); n=(fa.get('feature_parameters') or {}).get('label_period_candles'); (fa.__setitem__('identifier', sys.argv[2]+'-L%d'%n) if n and n!=18 else fa.pop('identifier',None)); json.dump(c,open(p,'w'),indent=1)" "$MV/config.strategy.json" "$MODEL_ID"
 echo "   bot limits: $CPUS CPUs, $MEM memory, $JOBS training threads; model $MODEL_ID"
 cat > /etc/systemd/system/majvaj-freqtrade.service <<UNIT
 [Unit]
@@ -114,7 +119,8 @@ ExecStartPre=-/usr/bin/docker rm -f majvaj-ft
 ExecStart=/usr/bin/docker run --rm --name majvaj-ft --memory $MEM --cpus $CPUS -p 127.0.0.1:8080:8080 \\
   -v $UD:/freqtrade/user_data $DIGEST trade \\
   --config /freqtrade/user_data/config-4h.json --config /freqtrade/user_data/config.private.json \\
-  --config /freqtrade/user_data/config.mode.json --config /freqtrade/user_data/config.pairs.json --strategy MajVajFreqAI4h --freqaimodel LightGBMRegressor
+  --config /freqtrade/user_data/config.mode.json --config /freqtrade/user_data/config.pairs.json \\
+  --config /freqtrade/user_data/majvaj/config.strategy.json --strategy MajVajFreqAI4h --freqaimodel LightGBMRegressor
 ExecStop=/usr/bin/docker stop -t 60 majvaj-ft
 Restart=always
 RestartSec=30

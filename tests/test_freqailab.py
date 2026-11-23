@@ -4,7 +4,7 @@ from desk import freqailab as F
 NOW = 1_800_000_000.0
 
 
-def fake_result(d, name, trades=4, profit=0.031, market=-0.12):
+def fake_result(d, name, trades=4, profit=0.031, market=-0.12, config=None):
     os.makedirs(d, exist_ok=True)
     st = {"total_trades": trades, "wins": 3, "losses": 1, "profit_total": profit, "profit_total_abs": 31.0,
           "market_change": market, "max_drawdown_account": 0.021, "winrate": 0.75, "freqai_identifier": "m-backtest",
@@ -12,7 +12,7 @@ def fake_result(d, name, trades=4, profit=0.031, market=-0.12):
           "final_balance": 1031.0}
     with zipfile.ZipFile(os.path.join(d, name), "w") as z:
         z.writestr(name.replace(".zip", ".json"), json.dumps({"strategy": {"MajVajFreqAI4h": st}, "strategy_comparison": []}))
-        z.writestr(name.replace(".zip", "_config.json"), "{}")
+        z.writestr(name.replace(".zip", "_config.json"), json.dumps(config or {}))
 
 
 class LabTests(unittest.TestCase):

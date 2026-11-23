@@ -20,6 +20,7 @@ from .livemode import ModeDesk, WARNING_OFF, WARNING_ON, WARNING_VERSION, PHRASE
 from .verdict import VerdictService, write_atomic
 from .freqailab import Lab
 from .pairs import Pairs, coins_text, selection
+from .strategysettings import StrategySettings
 
 GOAL_MODES = ("continue", "stop", "opportunity")
 SESSION_NAMES = ("Asia/Tokyo", "London", "London/New York overlap", "New York", "Quiet (late US)")
@@ -178,6 +179,7 @@ class MajVaj:
         self.mv_dir = os.path.dirname(self.cfg["verdict_file"])
         self.lab = Lab(os.path.dirname(self.mv_dir), clock=clock)
         self.pairs = Pairs(store.dir, os.path.dirname(self.mv_dir), clock=clock)
+        self.strategy = StrategySettings(self.mv_dir, os.path.join(os.path.dirname(self.mv_dir), "config-4h.json"), clock=clock)
         self.stop_event, self.thread = threading.Event(), None
 
     # ------------------------------------------------------------ mode (paper / live)
@@ -307,6 +309,20 @@ class MajVaj:
         return {"ok": True, "message": ("Restarting the trading bot. It is back in about a minute; open trades are kept."
                                         if what == "bot" else "Restarting Desk. Reload this page in about 15 seconds.")}
 
+    def save_strategy(self, body):
+        """Save the strategy settings and restart the bot so it trades with them. Nothing is restarted if saving fails."""
+        res = self.strategy.save(body.get("settings") if isinstance(body.get("settings"), dict) else body)
+        if not res["ok"]:
+            return res
+        self.restart_request("bot")
+        live = self.mode.state().get("mode") in ("live", "live_exit_only")
+        self.notifier.desk("Maj Vaj strategy settings changed%s: %s" % (" (LIVE)" if live else "", res["summary"]))
+        res["message"] = ("Saved. The bot restarts now and trades with these settings in about a minute." +
+                          (" Because the look-ahead changed, it trains a new model first (a few minutes per coin) and "
+                           "places no trades until that is done." if res["retrain"] else "") +
+                          (" The bot is LIVE, so this applies to real money." if live else ""))
+        return res
+
     def pairs_view(self, refresh=False):
         bot = self.ft.summary()
         open_pairs = [t.get("pair") for t in (bot.get("open") or [])] if bot.get("ok") else []
@@ -379,7 +395,7 @@ class MajVaj:
                                  books, pst["untrained"])
         return {"bot": bot, "books": books, "money": self.money(), "verdict_file": current, "closed": closed,
                 "trading": trading,
-                "decisions": self.decisions(), "briefing": brief, "grok": self.grok_settings(), "lab": self.lab.status(),
+                "decisions": self.decisions(), "briefing": brief, "grok": self.grok_settings(), "lab": self.lab.status(), "strategy": self.strategy.status(),
                 "latest_verdict": latest, "verdicts": self.verdicts.history(limit=25), "now": self.clock(),
                 "schedule": self.verdicts.schedule_text(), "next_check": self.verdicts.next_check(),
                 "mode": self.mode_info(bot), "data": self.econ.status(),

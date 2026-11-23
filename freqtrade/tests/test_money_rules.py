@@ -119,3 +119,23 @@ class ModelGateTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class SettingsFromConfigTests(unittest.TestCase):
+    """The Desk page's strategy settings reach the strategy through config keys; bad values fall back safely."""
+    def stub(self, cfg, default=0.03):
+        from types import SimpleNamespace
+        return SimpleNamespace(config=cfg, entry_threshold=default)
+
+    def test_threshold(self):
+        from MajVajFreqAI import MajVajFreqAI as S
+        self.assertEqual(S._threshold(self.stub({})), 0.03)                                   # nothing set: built-in
+        self.assertEqual(S._threshold(self.stub({"majvaj_entry_threshold": 0.015})), 0.015)
+        for bad in ("abc", None, -1, 0, 0.0001, 0.9, float("nan")):
+            self.assertEqual(S._threshold(self.stub({"majvaj_entry_threshold": bad})), 0.03, bad)
+
+    def test_trend_filter_only_accepts_a_real_boolean(self):
+        from MajVajFreqAI import MajVajFreqAI as S
+        self.assertTrue(S._trend_filter(self.stub({})))
+        self.assertFalse(S._trend_filter(self.stub({"majvaj_trend_filter": False})))
+        self.assertTrue(S._trend_filter(self.stub({"majvaj_trend_filter": "no"})))           # unclear: keep the safe filter on
