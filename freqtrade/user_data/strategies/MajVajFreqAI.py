@@ -60,7 +60,20 @@ ROUND_TRIP_COST = 0.0052
 EVENTS_FILE = "/freqtrade/user_data/majvaj/events.json"
 SERIES_FILE = "/freqtrade/user_data/majvaj/series.csv"
 EVENT_BEFORE_MIN, EVENT_AFTER_MIN = 60, 90
+DECISIONS_FILE = "/freqtrade/user_data/majvaj/decisions.jsonl"
+DECISIONS_MAX_BYTES = 1_000_000
 _cache = {}
+
+
+def log_decision(path, pair, result, reason, now=None):
+    """Append one entry decision (opened / rejected and why) for the Desk page. Never raises."""
+    try:
+        if os.path.exists(path) and os.path.getsize(path) > DECISIONS_MAX_BYTES:
+            os.replace(path, path + ".1")
+        with open(path, "a", encoding="utf-8") as f:
+            f.write(json.dumps({"at": now or time.time(), "pair": pair, "result": result, "reason": str(reason)[:300]}) + "\n")
+    except Exception:
+        pass
 
 
 def _cached(path, loader):
@@ -327,25 +340,32 @@ class MajVajFreqAI(IStrategy):
             logger.exception("Maj Vaj: entry check failed on %s, entry refused", pair)
             return False
 
+    def _decided(self, pair, result, reason):
+        if self.dp.runmode in (RunMode.DRY_RUN, RunMode.LIVE):  # backtests would flood the page
+            log_decision(self.config.get("majvaj_decisions_file", DECISIONS_FILE), pair, result, reason)
+
     def _confirm(self, pair, current_time):
+        ok, reason = self._confirm_reason(pair, current_time)
+        self._decided(pair, "approved" if ok else "rejected", reason)
+        if not ok:
+            logger.info("Maj Vaj: no entry on %s (%s)", pair, reason)
+        return ok
+
+    def _confirm_reason(self, pair, current_time):
         events = load_events(self.config.get("majvaj_events_file", EVENTS_FILE))
         if in_event_window(events, current_time.timestamp()):
-            logger.info("Maj Vaj calendar: no entry on %s, inside a high-impact event window", pair)
-            return False
+            return False, "calendar: inside a high-impact event window (FOMC / CPI / jobs / PPI)"
         if self._opportunity_mode(current_time):
             if not self._strong_signal(pair):
-                logger.info("Maj Vaj: goal reached, %s signal not strong enough for an extra trade", pair)
-                return False
+                return False, "goal reached: signal not strong enough for an extra trade"
             if self._gate_active() and self._verdict(current_time)[0] != "normal":
-                logger.info("Maj Vaj: goal reached, extra trades need a NORMAL fundamentals verdict")
-                return False
+                return False, "goal reached: extra trades need a NORMAL fundamentals verdict"
         if not self._gate_active():
-            return True
+            return True, "approved"
         verdict, reason = self._verdict(current_time)
         if verdict == "stand_down":
-            logger.info("Maj Vaj gate: no entry on %s (stand down: %s)", pair, reason)
-            return False
-        return True
+            return False, "fundamentals: stand down (%s)" % reason
+        return True, "approved (fundamentals %s)" % verdict
 
     def _money_decision(self, current_time, proposed_stake=1e12, max_stake=1e12):
         money = load_money(self.config.get("majvaj_money_file", MONEY_FILE),
@@ -381,9 +401,11 @@ class MajVajFreqAI(IStrategy):
                 stake *= 0.5
         if stake <= 0:
             logger.info("Maj Vaj money rules: no entry on %s (%s)", pair, reason)
+            self._decided(pair, "rejected", "money rules: " + reason)
             return 0.0
         if min_stake and stake < min_stake:
             logger.info("Maj Vaj money rules: %s stake %.2f below exchange minimum %.2f, skipped", pair, stake, min_stake)
+            self._decided(pair, "rejected", "stake %.2f below Kraken's minimum %.2f" % (stake, min_stake))
             return 0.0
         return stake
 

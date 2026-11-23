@@ -32,7 +32,8 @@ class ServerTests(unittest.TestCase):
 
     def test_page_loads_without_token_and_holds_no_secrets(self):
         code, body = call(self.server, "/", token=False)
-        self.assertEqual(code, 200); self.assertIn(b"Desk: keys", body)
+        self.assertEqual(code, 200); self.assertIn(b"<title>Maj Vaj</title>", body); self.assertIn(b"tab-keys", body)
+        self.assertEqual(call(self.server, "/paper", token=False)[0], 404)                # old engine page retired
         self.assertNotIn(self.server.token.encode(), body)
 
     def test_api_requires_token(self):
