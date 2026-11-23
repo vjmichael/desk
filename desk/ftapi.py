@@ -95,4 +95,4 @@ class FreqtradeAPI:
         except FtError:
             return None
         cash = next((c.get("free") for c in (b.get("currencies") or []) if c.get("currency") == stake), None)
-        return {"equity": b.get("total_bot", b.get("total")), "cash": cash, "currency": stake}
+        return {"equity": b.get("total", b.get("total_bot")), "cash": cash, "currency": stake}
