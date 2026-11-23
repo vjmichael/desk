@@ -98,12 +98,13 @@ def parse_proposals(text, now, whitelist, max_hold_hours=48):
     return ScoutResult(True, out, str(note)[:300] if note else "", "", skipped)
 
 
-RESEARCH_PROMPT = """You are the research desk of a small crypto paper-trading desk (Kraken spot: BTC, ETH, SOL).
+RESEARCH_PROMPT = """You are the research desk of a small crypto trading desk (Kraken spot: {coins}).
 Use web search and X search to find what could move these markets over the next hours to days:
 major news and regulatory items, ETF or exchange news, scheduled macro events in the next 48 hours
 (US data releases, Fed speakers, other central banks), protocol events (upgrades, token unlocks, outages),
 and the prevailing sentiment on X, noting which sources are reliable and which are noise.
-Report only what you actually found, with dates. Say plainly when nothing material turned up.
+Report only what you actually found, with dates. Say plainly when nothing material turned up, and name any of
+these coins you found little or no reliable coverage of.
 No trade recommendations. Plain text, at most 350 words."""
 
 
@@ -138,8 +139,8 @@ def responses_text(data):
 
 
 class GrokResearch:
-    def __init__(self, get_key, get_model, http=None):
-        self.get_key, self.get_model = get_key, get_model
+    def __init__(self, get_key, get_model, http=None, get_coins=lambda: "BTC, ETH, SOL"):
+        self.get_key, self.get_model, self.get_coins = get_key, get_model, get_coins
         self.http = http or net.http_json
 
     def digest(self, now):
@@ -147,7 +148,7 @@ class GrokResearch:
         if not key:
             return ResearchResult(False, error="Grok key is not saved")
         body = {"model": self.get_model(),
-                "input": [{"role": "user", "content": RESEARCH_PROMPT + "\nCurrent time (UTC): %s" % time.strftime("%Y-%m-%d %H:%M", time.gmtime(now))}],
+                "input": [{"role": "user", "content": RESEARCH_PROMPT.replace("{coins}", self.get_coins()) + "\nCurrent time (UTC): %s" % time.strftime("%Y-%m-%d %H:%M", time.gmtime(now))}],
                 "tools": [{"type": "web_search"}, {"type": "x_search"}]}
         headers = {"Authorization": "Bearer " + key, "Content-Type": "application/json"}
         try:

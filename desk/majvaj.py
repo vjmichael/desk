@@ -19,13 +19,13 @@ from .econdata import EconData
 from .livemode import ModeDesk, WARNING_OFF, WARNING_ON, WARNING_VERSION, PHRASE_LIVE, PHRASE_PAPER, blockers
 from .verdict import VerdictService, write_atomic
 from .freqailab import Lab
+from .pairs import Pairs, coins_text, selection
 
 GOAL_MODES = ("continue", "stop", "opportunity")
 SESSION_NAMES = ("Asia/Tokyo", "London", "London/New York overlap", "New York", "Quiet (late US)")
 MONEY_DEFAULTS = {"bankroll": 1000.0, "daily_goal_usd": 0.0, "goal_mode": "stop", "goal_reduce_pct": 50,
                   "goal_keep_pct": 50, "goal_sessions": ["Asia/Tokyo", "London/New York overlap"],
                   "daily_loss_limit_pct": 3.0, "timezone": "America/Denver"}
-PAIRS = ("BTC/USD", "ETH/USD", "SOL/USD")
 PAUSE_PHRASE = "PAUSE TRADING"
 RESUME_PHRASE = "RESUME TRADING"
 
@@ -130,13 +130,15 @@ class MajVaj:
         self.market = market or KrakenMarket()
         self.money_file = self.cfg["money_file"]
         settings_fn = lambda: load_settings(store.dir)
-        research = GrokResearch(lambda: store.get("grok_key"), lambda: settings_fn().grok_model)
+        coins = lambda: coins_text(store.dir)
+        research = GrokResearch(lambda: store.get("grok_key"), lambda: settings_fn().grok_model, get_coins=coins)
         self.verdicts = VerdictService(store.dir, self.cfg["verdict_file"], research, lambda: store.get("grok_key"),
-                                       settings_fn, self.notifier, clock=clock)
+                                       settings_fn, self.notifier, clock=clock, get_coins=coins)
         self.econ = EconData(store.dir, os.path.dirname(self.cfg["verdict_file"]), lambda: store.get("fred_key"))
         self.mode = ModeDesk(store.dir, self.verdicts._meta, clock=clock)
         self.mv_dir = os.path.dirname(self.cfg["verdict_file"])
         self.lab = Lab(os.path.dirname(self.mv_dir), clock=clock)
+        self.pairs = Pairs(store.dir, os.path.dirname(self.mv_dir), clock=clock)
         self.stop_event, self.thread = threading.Event(), None
 
     # ------------------------------------------------------------ mode (paper / live)
@@ -153,7 +155,8 @@ class MajVaj:
         closed = bot.get("closed_trades") or 0 if bot.get("ok") and bot.get("dry_run") else 0
         money = self.money()
         checks = self.mode.checks(closed, self._checks_7d(), money)
-        block = blockers(self._trade_key_saved(), money)
+        pst = self.pairs.status()
+        block = blockers(self._trade_key_saved(), money, pst["untrained"], pst["pending"])
         return {"state": self.mode.state(), "dry_run": bot.get("dry_run") if bot.get("ok") else None,
                 "checks": [{"name": n, "ok": ok, "detail": d} for n, ok, d in checks],
                 "blockers": block, "locked": bool(block),
@@ -168,7 +171,7 @@ class MajVaj:
         m = self.money()
         scope = {"bankroll": m["bankroll"], "daily_loss_limit_pct": m["daily_loss_limit_pct"],
                  "max_open_trades": bot.get("max_open_trades"), "strategy": bot.get("strategy"),
-                 "pairs": ["BTC/USD", "ETH/USD", "SOL/USD"], "venue": "Kraken spot"}
+                 "pairs": selection(self.store.dir)[0], "venue": "Kraken spot"}
         res = self.mode.request(to, body.get("phrase"), bool(body.get("ack")), info["blockers"], scope,
                                 [c["name"] for c in info["checks"] if not c["ok"]])
         if res["ok"] and to == "paper":
@@ -221,7 +224,14 @@ class MajVaj:
             return {"ok": False, "message": "Nothing changed. To confirm, type exactly: %s" % want}
         c = self.control()
         c.update(trading="running" if on else "paused", changed_at=self.clock(), changed_by="Maj Vaj page")
-        write_atomic(self.control_file(), c)
+        try:
+            write_atomic(self.control_file(), c)
+        except OSError as e:
+            # Without the saved choice the bot would be switched back within a minute, so change nothing.
+            return {"ok": False, "message": "Nothing changed: Desk could not save the choice to %s (%s). On the server run: "
+                                            "chown desk:1000 %s && chmod 775 %s && systemctl restart desk" % (
+                                                e.filename or self.control_file(), e.strerror or type(e).__name__,
+                                                os.path.dirname(self.control_file()), os.path.dirname(self.control_file()))}
         try:
             self.ft.start() if on else self.ft.pause()
             applied = True
@@ -249,6 +259,21 @@ class MajVaj:
             self.ft.start()
             return "running"
         return None
+
+    def restart_request(self, what):
+        """Restart button. Desk cannot restart services itself; the watchdog does it within seconds."""
+        if what not in ("bot", "desk"):
+            return {"ok": False, "message": "Unknown service."}
+        write_atomic(os.path.join(self.store.dir, "restart_request.json"), {"what": what, "at": self.clock()})
+        return {"ok": True, "message": ("Restarting the trading bot. It is back in about a minute; open trades are kept."
+                                        if what == "bot" else "Restarting Desk. Reload this page in about 15 seconds.")}
+
+    def pairs_view(self, refresh=False):
+        bot = self.ft.summary()
+        open_pairs = [t.get("pair") for t in (bot.get("open") or [])] if bot.get("ok") else []
+        m = self.money()
+        return {"catalog": self.pairs.catalog(m, refresh), "status": self.pairs.status(open_pairs),
+                "per_trade": round(self.pairs.per_trade(m), 2), "max_open_trades": self.pairs.max_open_trades()}
 
     # ------------------------------------------------------------ bot data
     def closed_trades(self):
@@ -311,6 +336,7 @@ class MajVaj:
                 "latest_verdict": latest, "verdicts": self.verdicts.history(limit=25), "now": self.clock(),
                 "schedule": self.verdicts.schedule_text(), "next_check": self.verdicts.next_check(),
                 "mode": self.mode_info(bot), "data": self.econ.status(),
+                "pairs": self.pairs.status([t.get("pair") for t in (bot.get("open") or [])] if bot.get("ok") else ()),
                 "control": {"trading_wanted": self.wanted_trading(),
                             "phrases": {"pause": PAUSE_PHRASE, "resume": RESUME_PHRASE}}}
 
@@ -396,14 +422,15 @@ class MajVaj:
             lines.append("Bot not answering: %s" % e)
         vs = sorted([v for v in self.verdicts.history(since=week, limit=1000) if v["ok"]], key=lambda v: v["ts"])
         candles = {}
-        for p in PAIRS:
+        chosen = selection(self.store.dir)[0]
+        for p in chosen:
             try:
                 candles[p] = self.market.candles(p, 60, since=week - 3600)
             except MarketError:
                 pass
         ev = evaluate_verdicts(vs, candles, now) if vs and candles else {}
         if ev:
-            lines.append("What the market did while each verdict was in force (avg of BTC, ETH, SOL):")
+            lines.append("What the market did while each verdict was in force (avg of %s):" % coins_text(self.store.dir))
             for k in ("normal", "caution", "stand_down"):
                 if k in ev:
                     r = ev[k]

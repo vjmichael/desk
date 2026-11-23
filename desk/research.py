@@ -2,9 +2,9 @@
 import json
 import os
 
-from . import backtest, history
+from . import backtest, history, pairs as pairs_mod
 
-SYMBOLS = ("BTC/USD", "ETH/USD", "SOL/USD")
+SYMBOLS = ("BTC/USD", "ETH/USD", "SOL/USD")   # the default; the coins chosen on the FreqAI tab are used
 
 
 class Research:
@@ -16,10 +16,13 @@ class Research:
         self.remote_factory = remote_factory or history.RemoteParts
         self.market = market
 
+    def symbols(self):
+        return tuple(pairs_mod.selection(self.dir)[0])
+
     def status(self):
         db = history.connect(self.db_path)
         try:
-            pairs = history.summary(db, SYMBOLS)
+            pairs = history.summary(db, self.symbols())
         finally:
             db.close()
         result = None
@@ -37,9 +40,9 @@ class Research:
             db = history.connect(self.db_path)
             try:
                 say("connecting to Kraken's history archive...")
-                history.import_archive(db, SYMBOLS, self.remote_factory(), say)
+                history.import_archive(db, self.symbols(), self.remote_factory(), say)
                 say("adding the latest candles...")
-                history.top_up(db, SYMBOLS, self.market, say)
+                history.top_up(db, self.symbols(), self.market, say)
                 say("done")
             finally:
                 db.close()
@@ -49,7 +52,7 @@ class Research:
         def work(say):
             db = history.connect(self.db_path)
             try:
-                series = {s: history.load(db, s) for s in SYMBOLS}
+                series = {s: history.load(db, s) for s in self.symbols()}
             finally:
                 db.close()
             if any(len(c) < 500 for c in series.values()):

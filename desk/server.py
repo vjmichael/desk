@@ -152,9 +152,10 @@ class Handler(BaseHTTPRequestHandler):
         try:
             fn()
         except Exception as e:  # never crash silently; never print str(e) (may hold a token)
-            sys.stderr.write("Desk: internal error (%s) while handling %s\n" % (type(e).__name__, self.path.split('?')[0]))
+            where = (" on %s" % e.filename) if isinstance(e, OSError) and isinstance(e.filename, str) else ""  # a path, never a secret
+            sys.stderr.write("Desk: internal error (%s%s) while handling %s\n" % (type(e).__name__, where, self.path.split('?')[0]))
             try:
-                self._send(500, {"ok": False, "message": "The app hit an internal error (%s). See the terminal window." % type(e).__name__})
+                self._send(500, {"ok": False, "message": "The app hit an internal error (%s%s)." % (type(e).__name__, where)})
             except Exception:
                 pass
 
@@ -178,6 +179,14 @@ class Handler(BaseHTTPRequestHandler):
             if mv is None:
                 return self._send(200, {"ok": False, "error": "Maj Vaj (the Freqtrade bot) is not set up on this machine."})
             return self._send(200, dict(mv.status(), ok=True, version=__version__))
+        if path == "/api/majvaj/pairs":
+            if not self._authorized():
+                return self._send(403, {"ok": False, "error": "bad token"})
+            mv = self.server.majvaj
+            if mv is None:
+                return self._send(200, {"ok": False, "error": "Maj Vaj is not set up on this machine."})
+            refresh = "refresh=1" in (self.path.split("?", 1) + [""])[1]
+            return self._send(200, dict(mv.pairs_view(refresh), ok=True))
         if path == "/api/history/status":
             if not self._authorized():
                 return self._send(403, {"ok": False, "error": "bad token"})
@@ -241,6 +250,10 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send(200, {"ok": True, "message": "Refreshing outside data; this takes up to a minute."})
             if action == "trading":
                 return self._send(200, mv.set_trading(bool(body.get("on")), body.get("confirm")))
+            if action == "pairs":
+                return self._send(200, mv.pairs.apply(body.get("pairs"), mv.money(), self.server.research, mv.notifier.recovery))
+            if action == "restart":
+                return self._send(200, mv.restart_request(str(body.get("what") or "")))
             if action == "backtest":
                 return self._send(200, mv.lab.request(str(body.get("range") or "")))
             if action == "grok":

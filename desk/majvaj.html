@@ -75,6 +75,15 @@ dialog::backdrop{background:rgba(0,0,0,.5)}
 
 <!-- ============================== FREQAI ============================== -->
 <section class="tab" id="t-freqai">
+ <div class="card"><h2>Coins the bot trades</h2><div id="pnow" class="mut">-</div>
+  <div class="row" style="margin-top:10px"><input id="psearch" placeholder="Search coins" style="width:160px">
+   <label class="mut"><input type="checkbox" id="pall" style="width:auto"> show coins that can't be picked</label>
+   <button id="prefresh">Refresh Kraken's list</button><span id="pcount" class="mut"></span>
+   <button id="papply" class="primary" style="margin-left:auto">Apply changes</button></div>
+  <div id="pconfirm" class="confirm"><div id="pctext"></div><div class="row" style="margin-top:8px"><button id="pgo" class="primary">Confirm</button><button id="pcancel">Cancel</button></div></div>
+  <div id="pmsg" class="mut" style="margin-top:6px"></div>
+  <div class="wrap" style="max-height:420px;overflow:auto;margin-top:6px"><table id="ptable"></table></div>
+  <p class="mut">BTC and ETH always stay: the model reads them as reference markets for every coin, so adding or removing another coin never retrains the rest. A new coin needs enough Kraken history (checked when you apply), trains its own model first, and cannot place a trade, paper or live, until that model is ready. Removing a coin never sells it: an open trade on it is managed to its normal exit. The bot still holds at most <span id="pmot">3</span> trades at a time.</p></div>
  <div class="card"><h2>Model</h2><div id="model" class="mut">-</div></div>
  <div class="card"><h2>Training data: Kraken candle history</h2><div id="hist" class="mut">-</div>
   <div class="row" style="margin-top:8px"><button id="hdl">Update history</button><span id="hmsg" class="mut"></span></div>
@@ -128,6 +137,8 @@ dialog::backdrop{background:rgba(0,0,0,.5)}
   </div><div class="row" style="margin-top:8px"><label>Time zone <input id="m_tz" style="width:170px"></label><button id="msave">Save</button></div>
   <p class="mut">Winning trades' net profit is protected and never traded again; losses reduce the active bankroll. Open trades are always managed, whatever these settings say.
   Opportunity mode, after the goal: one extra trade at a time, only in the ticked sessions, smaller, with a stronger signal and a NORMAL news verdict, sized so a loss can't take back more than you chose to give back.</p></div>
+ <div class="card"><h2>Restart</h2><div class="row"><button id="rsbot" data-w="bot">Restart trading bot</button><button id="rsdesk" data-w="desk">Restart Desk</button><span id="rsmsg" class="mut"></span></div>
+  <p class="mut">Click twice to confirm. Open trades and their stops are kept in the bot's database and picked up again. The bot is back in about a minute (longer if a coin is still training); at most a few restarts per hour.</p></div>
  <div class="card"><h2>Reports</h2><div class="row"><button id="rev">Send evening report now</button><button id="rwk">Send weekly review now</button></div>
   <pre id="rtext" class="mut" style="white-space:pre-wrap"></pre></div>
 </section>
@@ -165,7 +176,7 @@ const LABEL={normal:['NORMAL','ok'],caution:['CAUTION: half size','warn'],stand_
 function showTab(t){document.querySelectorAll('#tabs button').forEach(b=>b.classList.toggle('on',b.dataset.t===t));
   document.querySelectorAll('.tab').forEach(s=>s.classList.toggle('on',s.id==='t-'+t));
   try{localStorage.setItem('mv_tab',t);}catch(e){}
-  if(t==='keys')loadKeys();if(t==='freqai')loadLab();}
+  if(t==='keys')loadKeys();if(t==='freqai'){loadLab();loadPairs();}}
 $('tabs').onclick=e=>{const b=e.target.closest('button');if(b)showTab(b.dataset.t);};
 
 // ---------------------------------------------------------------- briefing (Grok's digest, plain text with **bold** and [n](url))
@@ -313,6 +324,58 @@ $('hdl').onclick=async()=>{say(await call('history/download',{}));setTimeout(loa
 $('btrun').onclick=async()=>{say(await api('backtest',{range:$('btrange').value}));loadLab();};
 $('rev').onclick=async()=>{const r=await api('report_now',{kind:'evening'});say(r);$('rtext').textContent=r.text||'';};
 $('rwk').onclick=async()=>{const r=await api('report_now',{kind:'weekly'});say(r);$('rtext').textContent=r.text||'';};
+
+// ---------------------------------------------------------------- Coins (FreqAI tab)
+let PV=null,PSEL=null,pollP=null;
+async function loadPairs(refresh){
+  const r=await call('majvaj/pairs'+(refresh?'?refresh=1':''));if(!r.ok){$('pmsg').textContent=r.error||'';return;}
+  PV=r;const st=r.status;
+  if(!PSEL)PSEL=new Set(st.chosen);
+  $('pmot').textContent=r.max_open_trades;
+  $('pnow').innerHTML=st.rows.map(x=>'<span class="badge '+(x.state==='trading'?'ok':'warn')+'">'+esc(x.pair)+'</span> <span class="mut">'+esc(x.state)+'</span>').join(' &nbsp; ')+
+    '<br>Smallest trade the bot may place: <b>'+money(r.per_trade)+' USD</b> (bankroll &divide; '+r.max_open_trades+' trades, halved under a CAUTION verdict). Coins whose Kraken minimum is above that can\'t be picked.';
+  const j=st.job||{};let t='';
+  if(j.status==='queued'||j.status==='running')t='Applying '+esc((j.pairs||[]).join(', '))+': copying history to the bot...';
+  else if(j.status==='failed')t='<span class="bad">Last change failed: '+esc(j.message||'')+'</span>';
+  else if(st.pending)t='Waiting for the watchdog to apply the change (seconds).';
+  const h=await call('history/status');
+  if(h.ok&&h.job&&h.job.kind==='pairs'&&(h.job.running||h.job.ok===false))t=(h.job.ok===false?'<span class="bad">':'')+esc(h.job.message)+(h.job.ok===false?'</span>':'');
+  $('pmsg').innerHTML=t;
+  if(r.catalog.error)$('pmsg').innerHTML+=(t?'<br>':'')+'<span class="warn">'+esc(r.catalog.error)+'</span>';
+  renderPairs();
+  clearTimeout(pollP);if(t&&!/failed/.test(t))pollP=setTimeout(()=>{if($('t-freqai').classList.contains('on'))loadPairs();},5000);
+}
+function renderPairs(){
+  if(!PV)return;const q=$('psearch').value.trim().toUpperCase(),all=$('pall').checked,lim=PV.status.limits;
+  const rows=(PV.catalog.rows||[]).filter(r=>(!q||r.pair.includes(q))&&(all||r.eligible||PSEL.has(r.pair)));
+  $('pcount').textContent=PSEL.size+' of '+lim.max_pairs+' chosen'+(PV.catalog.at?' · list from '+when(PV.catalog.at):'');
+  $('ptable').innerHTML='<tr><th></th><th>Coin</th><th class="n">24 h traded (USD)</th><th class="n">Price</th><th class="n">Kraken min order (USD)</th><th>Note</th></tr>'+
+    (rows.length?rows.map(r=>{const locked=lim.locked.includes(r.pair),on=PSEL.has(r.pair),dis=locked||(!on&&(!r.eligible||PSEL.size>=lim.max_pairs));
+      return '<tr><td><input type="checkbox" style="width:auto" data-p="'+esc(r.pair)+'"'+(on?' checked':'')+(dis?' disabled':'')+'></td><td><b>'+esc(r.pair)+'</b></td><td class="n">'+money(r.volume_usd).replace(/\.00$/,'')+
+      '</td><td class="n">'+num(r.last,6)+'</td><td class="n">'+(r.min_usd==null?'-':money(r.min_usd))+'</td><td class="mut">'+(locked?'always kept (reference market)':esc(r.reason))+'</td></tr>';}).join('')
+     :'<tr><td colspan="6" class="mut">'+(PV.catalog.rows&&PV.catalog.rows.length?'No match.':'Kraken\'s list is not loaded yet. Press Refresh Kraken\'s list.')+'</td></tr>');
+}
+$('ptable').onchange=e=>{const c=e.target.closest('input[data-p]');if(!c)return;const lim=PV.status.limits;
+  if(c.checked){if(PSEL.size>=lim.max_pairs){c.checked=false;return;}PSEL.add(c.dataset.p);}else PSEL.delete(c.dataset.p);renderPairs();};
+$('psearch').oninput=renderPairs;$('pall').onchange=renderPairs;
+$('prefresh').onclick=()=>{$('pmsg').textContent='Reading Kraken\'s list...';loadPairs(true);};
+$('papply').onclick=()=>{if(!PV)return;const cur=PV.status.chosen,want=[...PSEL];
+  const add=want.filter(p=>!cur.includes(p)),rem=cur.filter(p=>!want.includes(p));
+  if(!add.length&&!rem.length){$('pmsg').textContent='Nothing changed.';return;}
+  $('pctext').innerHTML=(add.length?'<b>Add:</b> '+esc(add.join(', '))+'. Desk downloads their history first and refuses any coin with less than '+PV.status.limits.required_days+' days. Each new coin trains before it may trade.<br>':'')+
+    (rem.length?'<b>Remove:</b> '+esc(rem.join(', '))+'. No new trades on them; an open trade is managed to its normal exit, not sold.<br>':'')+
+    'The bot restarts once to switch (about a minute; existing coins keep their models).';
+  $('pconfirm').style.display='block';};
+$('pcancel').onclick=()=>{$('pconfirm').style.display='none';};
+$('pgo').onclick=async()=>{$('pconfirm').style.display='none';const r=await api('pairs',{pairs:[...PSEL]});
+  $('pmsg').innerHTML='<span class="'+(r.ok?'ok':'bad')+'">'+esc(r.message||r.error||'')+'</span>';if(r.ok){PSEL=null;setTimeout(loadPairs,2000);}};
+
+// ---------------------------------------------------------------- Restart buttons
+const rsArm={};
+for(const id of ['rsbot','rsdesk'])$(id).onclick=async e=>{const b=e.currentTarget,w=b.dataset.w,label=b.textContent;
+  if(!rsArm[w]){b.classList.add('del','armed');b.textContent='Click again to restart';rsArm[w]=setTimeout(()=>{rsArm[w]=0;b.classList.remove('del','armed');b.textContent=w==='bot'?'Restart trading bot':'Restart Desk';},5000);return;}
+  clearTimeout(rsArm[w]);rsArm[w]=0;b.classList.remove('del','armed');b.textContent=w==='bot'?'Restart trading bot':'Restart Desk';
+  const r=await api('restart',{what:w});$('rsmsg').textContent=r.message||r.error||'';$('rsmsg').className=r.ok?'ok':'bad';};
 
 // ---------------------------------------------------------------- Keys tab
 const SERVICES=[

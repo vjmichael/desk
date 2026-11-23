@@ -135,6 +135,8 @@ class RemoteParts:
 def _member_names(symbol):
     base, _, quote = symbol.partition("/")
     codes = {("XBT" if base == "BTC" else base) + quote, base + quote, "XBT" + quote if base == "BTC" else base + quote}
+    if symbol in KNOWN:
+        codes.add(KNOWN[symbol])        # Kraken's own code, e.g. XDGUSD for DOGE/USD
     return {c + "_60.csv" for c in codes}
 
 

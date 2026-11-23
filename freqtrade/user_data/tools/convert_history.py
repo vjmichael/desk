@@ -1,4 +1,5 @@
-"""Copy Desk's Kraken history (history.db) into Freqtrade's data folder, 1h and 4h candles.
+"""Copy Desk's Kraken history (history.db) into Freqtrade's data folder: 1h, 4h and daily candles, for every coin
+in the database (the coins chosen on the Desk's FreqAI tab, plus any removed earlier; extra files are harmless).
 Run inside the Freqtrade environment: python convert_history.py <history.db> <user_data/data/kraken>"""
 import sqlite3
 import sys
@@ -8,7 +9,6 @@ import pandas as pd
 from freqtrade.data.history.datahandlers import get_datahandler
 from freqtrade.enums import CandleType
 
-PAIRS = ("BTC/USD", "ETH/USD", "SOL/USD")
 COLS = ["date", "open", "high", "low", "close", "volume"]
 
 
@@ -17,7 +17,8 @@ def main(db_path, out_dir):
     out.mkdir(parents=True, exist_ok=True)
     dh = get_datahandler(out, "feather")
     db = sqlite3.connect("file:%s?mode=ro" % db_path, uri=True)
-    for pair in PAIRS:
+    pairs = [r[0] for r in db.execute("SELECT DISTINCT symbol FROM candles ORDER BY symbol")]
+    for pair in pairs:
         df = pd.read_sql_query("SELECT ts, o AS open, h AS high, l AS low, c AS close, v AS volume "
                                "FROM candles WHERE symbol=? ORDER BY ts", db, params=(pair,))
         if df.empty:

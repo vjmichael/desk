@@ -1,4 +1,4 @@
-"""Maj Vaj: FreqAI spot strategy for Kraken BTC/ETH/SOL (long only).
+"""Maj Vaj: FreqAI spot strategy for Kraken spot coins (long only). The coins are chosen on the Desk's FreqAI tab.
 
 The model predicts the average price change over the next 24 hourly candles.
 The strategy buys only when that prediction clears trading costs by a margin and
@@ -21,11 +21,15 @@ Money rules (the Maj Vaj financial design, TB-FIN-01), applied in every mode inc
 - Daily loss limit: no new entries after losing a set share of the day's starting bankroll.
 Settings live in majvaj/money.json (written from the Desk page). Open trades are always managed.
 
+Trained-model gate (paper and live): a coin trades only after FreqAI has saved a trained model for it, so a
+newly added coin can never place an order before training.
+
 Economic calendar gate (all modes, backtests included, because these dates are published in advance):
 no new entries from 60 minutes before to 90 minutes after an FOMC decision or a CPI, jobs or PPI release.
 Outside data features (point-in-time): Crypto Fear & Greed level and 7-day change, hours to the next and
 since the last high-impact event, and (when a FRED key is set) CPI year-on-year, unemployment and the
 fed funds rate as first published. A value is used only after the moment it became public."""
+import glob
 import json
 import logging
 import os
@@ -74,6 +78,15 @@ def log_decision(path, pair, result, reason, now=None):
             f.write(json.dumps({"at": now or time.time(), "pair": pair, "result": result, "reason": str(reason)[:300]}) + "\n")
     except Exception:
         pass
+
+
+def model_trained(models_dir, identifier, pair):
+    """True once FreqAI has saved a model for this coin (folder sub-train-<COIN>_<time>)."""
+    if not identifier:
+        return False
+    coin = pair.split("/")[0]
+    return any(os.path.isdir(d) for d in
+               glob.glob(os.path.join(str(models_dir), glob.escape(identifier), "sub-train-%s_*" % glob.escape(coin))))
 
 
 def _cached(path, loader):
@@ -351,7 +364,15 @@ class MajVajFreqAI(IStrategy):
             logger.info("Maj Vaj: no entry on %s (%s)", pair, reason)
         return ok
 
+    def _model_ready(self, pair):
+        if self.dp.runmode not in (RunMode.DRY_RUN, RunMode.LIVE):
+            return True   # backtests train as they go
+        ud = self.config.get("user_data_dir") or "/freqtrade/user_data"
+        return model_trained(os.path.join(str(ud), "models"), (self.freqai_info or {}).get("identifier"), pair)
+
     def _confirm_reason(self, pair, current_time):
+        if not self._model_ready(pair):
+            return False, "no trained model for this coin yet (it trains before it may trade)"
         events = load_events(self.config.get("majvaj_events_file", EVENTS_FILE))
         if in_event_window(events, current_time.timestamp()):
             return False, "calendar: inside a high-impact event window (FOMC / CPI / jobs / PPI)"

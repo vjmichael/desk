@@ -80,13 +80,18 @@ def readiness(now, paper_since, closed_paper_trades, checks_7d, watchdog_state, 
     ]
 
 
-def blockers(trade_key_saved, money):
-    """The only things that stop the switch: without them live trading cannot work at all."""
+def blockers(trade_key_saved, money, untrained=(), pairs_pending=False):
+    """The only things that stop the switch: without them live trading cannot work at all, or a coin could go live
+    before its model is trained."""
     out = []
     if not trade_key_saved:
         out.append("Save a trade-enabled Kraken key on the Keys page (section 'Kraken trade key').")
     if not (money and money.get("bankroll", 0) > 0):
         out.append("Set an authorized bankroll in Money rules.")
+    if untrained:
+        out.append("Wait until every coin has a trained model (still training: %s)." % ", ".join(untrained))
+    if pairs_pending:
+        out.append("Wait until the coin change on the FreqAI tab is applied.")
     return out
 
 

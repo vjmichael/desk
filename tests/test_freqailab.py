@@ -46,7 +46,9 @@ class LabTests(unittest.TestCase):
         calls, active = [], ["active"]
         def run_out(cmd):
             calls.append(cmd)
-            return active[0] if cmd[:2] == ["systemctl", "is-active"] else ""
+            if cmd[:2] == ["systemctl", "is-active"]:
+                return active[0] if cmd[2] == F.UNIT else "inactive"
+            return ""
         orig = os.chown
         os.chown = lambda *a: None
         try:
@@ -55,7 +57,7 @@ class LabTests(unittest.TestCase):
             os.chown = orig
         start = [c for c in calls if c[0] == "systemd-run"][0]
         script = start[-1]
-        self.assertIn("--timerange 20260717-", script)                       # 182 days before NOW
+        self.assertIn("--timerange 20260717-20270115 ", script)              # 182 days before NOW, ends today
         self.assertIn("--cpus 1", script); self.assertIn("backtest_override.json", script)
         self.assertEqual(json.load(open(os.path.join(self.ud, "majvaj", "backtest_override.json")))["freqai"]["identifier"],
                          "majvaj-4h-abc-backtest")                         # never the live model's folder
@@ -67,6 +69,12 @@ class LabTests(unittest.TestCase):
         self.assertEqual(F.tick(self.ud, "img", "/h.db", NOW + 900, run_out, notes.append), "backtest done")
         self.assertEqual(self.lab.status()["backtest"]["status"], "done"); self.assertTrue(notes)
         self.assertIsNone(F.tick(self.ud, "img", "/h.db", NOW + 1000, run_out))
+
+    def test_backtest_waits_for_a_coin_change(self):
+        self.lab.request("3m")
+        self.assertEqual(F.tick(self.ud, "img", "/h.db", NOW, lambda c: "active" if c[-1] == "majvaj-pairs" else ""),
+                         "backtest waiting for a coin change to finish")
+        self.assertTrue(os.path.exists(os.path.join(self.ud, "majvaj", "backtest_request.json")))
 
     def test_failed_run_is_reported(self):
         json.dump({"status": "running", "label": "Last 3 months"}, open(os.path.join(self.ud, "majvaj", "backtest_state.json"), "w"))

@@ -6,19 +6,30 @@ and send alerts. It never changes settings, never closes positions and never tou
 Checks: Freqtrade answers and keeps processing; Desk answers; the fundamentals verdict is
 fresh; disk and memory. If everything is fine it pings an outside heartbeat URL (if set), so a
 dead droplet is noticed from outside. It also answers Recovery-bot commands from your chat:
-/status /pause /resume /restart /help."""
+/status /pause /resume /restart /help.
+
+`python3 -m desk.watchdog --apply <config>` runs only the "apply" steps (paper/live switch, coin change, restart
+button, backtest). A systemd path unit starts it the moment Desk records a request, so the page does not wait for
+the next 2-minute round. Both runs take the same lock, so they never apply the same request twice."""
+import fcntl
 import json
 import os
+import pwd
 import shutil
 import subprocess
 import sys
 import time
 
-from . import connectors, freqailab, livemode, net
+from . import connectors, freqailab, livemode, net, pairs
 from .ftapi import FreqtradeAPI, FtError
 from .store import Store
 
 STATE = "/var/lib/majvaj/watchdog.json"
+LOCK = "/run/majvaj-apply.lock"
+MANUAL_LOG = "/var/lib/majvaj/manual_restarts.json"
+RESTART_UNITS = {"bot": "majvaj-freqtrade", "desk": "desk"}
+MANUAL_RESTARTS_PER_HOUR = 4
+REQUEST_MAX_AGE = 900
 MAX_RESTARTS_PER_HOUR = 3
 FT_STALE_MIN = 20
 ALERT_GAP = {"default": 1800, "verdict": 3 * 3600, "giveup": 2 * 3600}
@@ -189,6 +200,76 @@ def handle_commands(store, ft, state, obs, run, cfg=None):
     return replies
 
 
+def heal_folder(path, owner="desk", group=1000):
+    """Desk writes verdicts, money settings and the pause choice into the bot's folder, and the bot (uid 1000) writes
+    its decision log there. If anything resets the folder's owner, put it back. Returns True if it had to."""
+    try:
+        st = os.stat(path)
+        uid = pwd.getpwnam(owner).pw_uid
+    except (OSError, KeyError):
+        return False
+    if st.st_uid == uid and st.st_gid == group and st.st_mode & 0o775 == 0o775:
+        return False
+    os.chown(path, uid, group)
+    os.chmod(path, 0o775)
+    return True
+
+
+def manual_restart(desk_dir, now, run, notify, log_path=MANUAL_LOG):
+    """The Restart buttons on the Desk page: Desk records which service; this restarts it (a few per hour at most)."""
+    req_path = os.path.join(desk_dir, "restart_request.json")
+    req = load_state(req_path)
+    if not os.path.exists(req_path):
+        return None
+    os.remove(req_path)
+    unit = RESTART_UNITS.get(req.get("what"))
+    if not unit or now - float(req.get("at") or 0) > REQUEST_MAX_AGE:
+        return "restart request ignored"
+    log = load_state(log_path)
+    recent = [t for t in log.get(unit, []) if now - t < 3600]
+    if len(recent) >= MANUAL_RESTARTS_PER_HOUR:
+        notify("Maj Vaj: restart of %s refused; it was restarted %d times in the last hour already." % (unit, len(recent)))
+        return "restart refused (limit)"
+    log[unit] = recent + [now]
+    save_state(log_path, log)
+    run(["systemctl", "restart", unit])
+    notify("Maj Vaj: %s restarted from the Desk page. Open trades are kept in the bot's database." % unit)
+    return "restarted " + unit
+
+
+def apply_steps(cfg, ft, now, run, notify, run_out=None):
+    """Everything Desk can ask for. Never raises; each step reports on its own."""
+    desk_dir = cfg.get("desk_data_dir", "/var/lib/desk")
+    ud = os.path.dirname(os.path.dirname(cfg["verdict_file"]))
+    out = {}
+    os.makedirs(os.path.dirname(LOCK), exist_ok=True)
+    with open(LOCK, "w") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        try:
+            if heal_folder(os.path.dirname(cfg["verdict_file"])):
+                notify("Watchdog: the bot's settings folder had the wrong owner (Desk could not save verdicts or the "
+                       "pause switch). Fixed.")
+        except Exception as e:
+            notify("Watchdog: could not check the bot folder's owner (%s)." % type(e).__name__)
+        steps = (
+            ("mode_last", "mode switch", lambda: livemode.apply_pending(
+                ft, os.path.join(desk_dir, "mode_request.json"), now, run, notify,
+                desk_secrets=os.path.join(desk_dir, "secrets.json"))),
+            ("restart_last", "restart", lambda: manual_restart(desk_dir, now, run, notify)),
+            ("pairs_last", "coin change", lambda: pairs.tick(ud, cfg.get("ft_image"), desk_dir,
+                                                             os.path.join(desk_dir, "history.db"), now, run_out, notify)),
+            ("backtest_last", "backtest", lambda: freqailab.tick(ud, cfg.get("ft_image"), os.path.join(desk_dir, "history.db"),
+                                                                 now, run_out, notify)),
+        )
+        for key, name, fn in steps:
+            try:
+                out[key] = fn()
+            except Exception as e:  # one failing step never stops the others or the watchdog
+                out[key] = "%s failed (%s)" % (name, type(e).__name__)
+                notify("Watchdog: %s step failed (%s); no change was made." % (name, type(e).__name__))
+    return out
+
+
 def ping_heartbeat(url, healthy):
     if not url:
         return
@@ -196,6 +277,27 @@ def ping_heartbeat(url, healthy):
         net.http_json("GET", url if healthy else url.rstrip("/") + "/fail", timeout=10)
     except net.NetError:
         pass
+
+
+def apply_only(config_path):
+    """Run by the path unit the moment Desk records a request."""
+    with open(config_path, "r", encoding="utf-8") as f:
+        cfg = json.load(f)
+    store = Store(cfg.get("desk_data_dir", "/var/lib/desk"))
+    ft = FreqtradeAPI(cfg.get("ft_url", "http://127.0.0.1:8080"), cfg["ft_username"], cfg["ft_password"])
+    tok, chat = store.get("telegram_recovery_token"), store.get("telegram_recovery_chat_id")
+
+    def notify(text):
+        if tok and chat:
+            try:
+                connectors._tg(tok, "sendMessage", {"chat_id": chat, "text": text[:3500]})
+            except net.NetError:
+                pass
+
+    def run(cmd):
+        subprocess.run(cmd, check=False, timeout=120, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    apply_steps(cfg, ft, time.time(), run, notify)
+    return 0
 
 
 def main(config_path="/etc/majvaj/majvaj.json"):
@@ -231,19 +333,7 @@ def main(config_path="/etc/majvaj/majvaj.json"):
                 connectors._tg(tok, "sendMessage", {"chat_id": chat, "text": text[:3500]})
             except net.NetError:
                 pass
-    try:
-        desk_dir = cfg.get("desk_data_dir", "/var/lib/desk")
-        state["mode_last"] = livemode.apply_pending(
-            ft, os.path.join(desk_dir, "mode_request.json"), now, run, recovery,
-            desk_secrets=os.path.join(desk_dir, "secrets.json"))
-    except Exception as e:  # never let a mode problem stop the watchdog
-        recovery("Watchdog: mode switch step failed (%s); no change was made." % type(e).__name__)
-    try:
-        state["backtest_last"] = freqailab.tick(os.path.dirname(os.path.dirname(cfg["verdict_file"])), cfg.get("ft_image"),
-                                                os.path.join(cfg.get("desk_data_dir", "/var/lib/desk"), "history.db"),
-                                                now, notify=recovery)
-    except Exception as e:  # a backtest problem must never stop the watchdog
-        recovery("Watchdog: backtest step failed (%s)." % type(e).__name__)
+    state.update(apply_steps(cfg, ft, now, run, recovery))
     ping_heartbeat(cfg.get("heartbeat_url"), healthy)
     state["last_run"] = now
     state["last_obs"] = obs
@@ -252,4 +342,6 @@ def main(config_path="/etc/majvaj/majvaj.json"):
 
 
 if __name__ == "__main__":
+    if sys.argv[1:2] == ["--apply"]:
+        sys.exit(apply_only(*sys.argv[2:]))
     sys.exit(main(*sys.argv[1:]))

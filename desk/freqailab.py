@@ -16,6 +16,8 @@ import time
 import zipfile
 from datetime import datetime, timedelta, timezone
 
+from .pairs import UNIT as PAIRS_UNIT, applied, refresh_data_script
+
 RANGES = {"3m": ("Last 3 months", 91), "6m": ("Last 6 months", 182), "12m": ("Last 12 months", 365),
           "24m": ("Last 2 years", 730)}
 UNIT = "majvaj-backtest"
@@ -79,7 +81,7 @@ class Lab:
         fp = fa.get("feature_parameters") or {}
         return {"identifier": ident, "last_trained": trained, "retrain_hours": fa.get("live_retrain_hours"),
                 "train_days": fa.get("train_period_days"), "label_candles": fp.get("label_period_candles"),
-                "timeframes": fp.get("include_timeframes"), "pairs": (cfg.get("exchange") or {}).get("pair_whitelist"),
+                "timeframes": fp.get("include_timeframes"), "pairs": applied(self.p["ud"]),
                 "timeframe": cfg.get("timeframe")}
 
     def results(self, limit=6):
@@ -134,26 +136,25 @@ def tick(user_data, image, desk_history="/var/lib/desk/history.db", now=None, ru
     req = _read(p["request"])
     if not req:
         return None
+    if run_out(["systemctl", "is-active", PAIRS_UNIT]).strip() in ("active", "activating"):
+        return "backtest waiting for a coin change to finish"   # both write the bot's data folder
     os.remove(p["request"])
     if not image or req.get("range") not in RANGES:
         _write(p["state"], {"status": "failed", "finished": now, "message": "No bot image known; rerun the installer."})
         return "backtest refused"
     label, days = RANGES[req["range"]]
     start = (datetime.fromtimestamp(now, timezone.utc) - timedelta(days=days)).strftime("%Y%m%d")
+    end = datetime.fromtimestamp(now, timezone.utc).strftime("%Y%m%d")   # FreqAI backtests need an end date
     ident = ((_read(p["config"]) or {}).get("freqai") or {}).get("identifier") or "majvaj-4h"
     _write(p["override"], {"freqai": {"identifier": ident + "-backtest"}})
     os.chown(p["override"], 1000, 1000)
-    ud, work = user_data, os.path.join(os.path.dirname(user_data), "work")
+    ud = user_data
     q = shlex.quote
-    script = " && ".join([
-        "python3 -c %s" % q("import sqlite3; s=sqlite3.connect('file:%s?mode=ro',uri=True); d=sqlite3.connect('%s/history.db'); "
-                             "s.backup(d); d.close()" % (desk_history, work)),
-        "docker run --rm --entrypoint python -v %s:/freqtrade/user_data -v %s:/work:ro %s "
-        "/freqtrade/user_data/tools/convert_history.py /work/history.db /freqtrade/user_data/data/kraken" % (q(ud), q(work), q(image)),
-        "chown -R 1000:1000 %s" % q(os.path.join(ud, "data")),
+    pairs_cfg = "--config /freqtrade/user_data/config.pairs.json " if os.path.exists(os.path.join(ud, "config.pairs.json")) else ""
+    script = " && ".join(refresh_data_script(ud, image, desk_history) + [
         "docker run --rm --name majvaj-backtest --cpus 1 --memory 2g -v %s:/freqtrade/user_data %s backtesting "
-        "--config /freqtrade/user_data/config-4h.json --config /freqtrade/user_data/majvaj/backtest_override.json "
-        "--strategy MajVajFreqAI4h --freqaimodel LightGBMRegressor --timerange %s- --export trades" % (q(ud), q(image), start),
+        "--config /freqtrade/user_data/config-4h.json %s--config /freqtrade/user_data/majvaj/backtest_override.json "
+        "--strategy MajVajFreqAI4h --freqaimodel LightGBMRegressor --timerange %s-%s --export trades" % (q(ud), q(image), pairs_cfg, start, end),
     ])
     wrapped = "(%s); echo $? > %s" % (script, q(p["exit"]))
     try:

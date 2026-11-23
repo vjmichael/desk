@@ -180,6 +180,20 @@ class ControlTests(unittest.TestCase):
         self.assertEqual(self.ft.calls, [])
         self.assertTrue(self.mv.wanted_trading())
 
+    def test_unwritable_folder_changes_nothing_and_names_the_file(self):
+        from unittest import mock
+        err = PermissionError(13, "Permission denied", "/opt/majvaj/ft/user_data/majvaj/.verdict-x")
+        with mock.patch.object(MV, "write_atomic", side_effect=err):
+            r = self.mv.set_trading(False, "PAUSE TRADING")
+        self.assertFalse(r["ok"]); self.assertIn("chown desk:1000", r["message"]); self.assertIn(".verdict-x", r["message"])
+        self.assertEqual(self.ft.calls, [])                       # the bot is not paused behind your back
+
+    def test_restart_button_records_a_request(self):
+        self.assertFalse(self.mv.restart_request("everything")["ok"])
+        self.assertTrue(self.mv.restart_request("bot")["ok"])
+        req = json.load(open(os.path.join(self.mv.store.dir, "restart_request.json")))
+        self.assertEqual(req["what"], "bot")
+
     def test_pause_is_kept_across_bot_restarts(self):
         self.assertTrue(self.mv.set_trading(False, "pause trading")["ok"])
         self.assertEqual(self.ft.calls, ["pause"]); self.assertFalse(self.mv.wanted_trading())

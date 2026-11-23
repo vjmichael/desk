@@ -68,6 +68,8 @@ fi
 if [ -n "${HEARTBEAT_URL:-}" ]; then
   python3 -c "import json,sys; c=json.load(open('$CFG')); c['heartbeat_url']=sys.argv[1]; json.dump(c,open('$CFG','w'),indent=2)" "$HEARTBEAT_URL"
 fi
+# The coins the bot trades (chosen on the Desk's FreqAI tab; the watchdog rewrites this file on a change).
+[ -f "$UD/config.pairs.json" ] || python3 -c "import json,sys; c=json.load(open(sys.argv[1])); json.dump({'exchange': {'pair_whitelist': c['exchange']['pair_whitelist']}}, open(sys.argv[2],'w'))" "$UD/config-4h.json" "$UD/config.pairs.json"
 [ -f "$UD/config.mode.json" ] || echo '{"dry_run": true, "db_url": "sqlite:////freqtrade/user_data/tradesv3.dryrun.sqlite"}' > "$UD/config.mode.json"
 chown -R 1000:1000 "$UD"; chmod 600 "$UD/config.private.json" "$UD/config.mode.json"
 chown desk:1000 "$MV"; chmod 775 "$MV"   # Desk writes settings and verdicts here; the bot (uid 1000) writes its decision log
@@ -112,7 +114,7 @@ ExecStartPre=-/usr/bin/docker rm -f majvaj-ft
 ExecStart=/usr/bin/docker run --rm --name majvaj-ft --memory $MEM --cpus $CPUS -p 127.0.0.1:8080:8080 \\
   -v $UD:/freqtrade/user_data $DIGEST trade \\
   --config /freqtrade/user_data/config-4h.json --config /freqtrade/user_data/config.private.json \\
-  --config /freqtrade/user_data/config.mode.json --strategy MajVajFreqAI4h --freqaimodel LightGBMRegressor
+  --config /freqtrade/user_data/config.mode.json --config /freqtrade/user_data/config.pairs.json --strategy MajVajFreqAI4h --freqaimodel LightGBMRegressor
 ExecStop=/usr/bin/docker stop -t 60 majvaj-ft
 Restart=always
 RestartSec=30
@@ -142,19 +144,46 @@ Persistent=true
 [Install]
 WantedBy=timers.target
 UNIT
+# Instant apply: the moment Desk records a request (paper/live, coin change, restart button), run the apply steps
+# instead of waiting for the next 2-minute watchdog round.
+cat > /etc/systemd/system/majvaj-apply.service <<UNIT
+[Unit]
+Description=Maj Vaj: apply a request from the Desk page (paper/live, coins, restart)
+
+[Service]
+Type=oneshot
+WorkingDirectory=/opt/desk
+ExecStart=/usr/bin/python3 -m desk.watchdog --apply $CFG
+TimeoutStartSec=300
+UNIT
+cat > /etc/systemd/system/majvaj-apply.path <<UNIT
+[Unit]
+Description=Watch for requests from the Maj Vaj Desk page
+
+[Path]
+PathExists=/var/lib/desk/mode_request.json
+PathExists=/var/lib/desk/pairs_request.json
+PathExists=/var/lib/desk/restart_request.json
+Unit=majvaj-apply.service
+
+[Install]
+WantedBy=multi-user.target
+UNIT
 systemctl daemon-reload
 systemctl restart desk
 systemctl enable majvaj-freqtrade >/dev/null 2>&1
 systemctl reset-failed majvaj-freqtrade 2>/dev/null || true
 systemctl restart majvaj-freqtrade
 systemctl enable --now majvaj-watchdog.timer >/dev/null 2>&1
+systemctl enable majvaj-apply.path >/dev/null 2>&1; systemctl restart majvaj-apply.path
 
 echo "== 8/8 Check"
 sleep 20
-for u in desk majvaj-freqtrade majvaj-watchdog.timer; do printf '   %-24s %s\n' "$u" "$(systemctl is-active $u)"; done
+for u in desk majvaj-freqtrade majvaj-watchdog.timer majvaj-apply.path; do printf '   %-24s %s\n' "$u" "$(systemctl is-active $u)"; done
 echo
 echo "Done. If the strategy did not change, the bot reuses its saved model and is up in about a minute."
 echo "If it changed, it trains a new model first (a few minutes). It also needs a fresh Grok verdict"
 echo "before it may open trades. Watch it on the Desk page."
 echo "Update later by running this same script again (it fetches its own newest version first)."
 echo "Live trading: add a trade-enabled Kraken key on the Keys tab, then use the switch on the Paper settings tab."
+echo "Coins: choose them on the FreqAI tab (BTC and ETH always stay). New coins train before they can trade."
