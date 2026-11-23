@@ -4,21 +4,34 @@
 <style>
 :root{--bg:#f6f7f9;--fg:#1b1f24;--mut:#667;--card:#fff;--line:#d9dde3;--ok:#0a7d33;--bad:#b3261e;--warn:#9a6700;--acc:#1f5fd1}
 @media(prefers-color-scheme:dark){:root{--bg:#14171b;--fg:#e8eaed;--mut:#9aa3ad;--card:#1d2127;--line:#2f353d;--ok:#4cc97a;--bad:#ff7b72;--warn:#e3b341;--acc:#6ea1ff}}
+*{box-sizing:border-box}
 body{margin:0;padding:16px;background:var(--bg);color:var(--fg);font:15px/1.45 system-ui,Segoe UI,sans-serif}
-main{max-width:980px;margin:0 auto}h1{font-size:20px;margin:0 0 4px}h2{font-size:15px;margin:0 0 8px}
-.card{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:12px 14px;margin:12px 0}
+main{max-width:1280px;margin:0 auto}h1{font-size:20px;margin:0}h2{font-size:15px;margin:0 0 8px}
+a{color:var(--acc)}
+.card{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:12px 14px;margin:0 0 12px}
 .row{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
-.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px}
-.stat b{display:block;font-size:20px}.stat span,.mut{color:var(--mut);font-size:13px}
+.top{display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin-bottom:10px}
+.tabs{display:flex;flex-wrap:wrap;gap:4px;border-bottom:1px solid var(--line);margin-bottom:12px}
+.tabs button{border:1px solid transparent;border-bottom:none;border-radius:6px 6px 0 0;background:none;padding:8px 14px;margin:0;color:var(--mut)}
+.tabs button.on{background:var(--card);border-color:var(--line);color:var(--fg);font-weight:600;margin-bottom:-1px}
+.tab{display:none}.tab.on{display:block}
+.grid{display:grid;grid-template-columns:minmax(0,3fr) minmax(0,2fr);gap:12px;align-items:start}
+@media(max-width:900px){.grid{grid-template-columns:minmax(0,1fr)}.stats{grid-template-columns:repeat(2,minmax(0,1fr))}}
+.stats{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}
+.stat b{display:block;font-size:22px}.stat span,.mut{color:var(--mut);font-size:13px}
+.small{display:flex;flex-wrap:wrap;gap:4px 18px;margin-top:8px;font-size:13px;color:var(--mut)}.small b{color:var(--fg)}
 button{font:inherit;padding:6px 12px;border:1px solid var(--line);border-radius:6px;background:var(--card);color:var(--fg);cursor:pointer}
-table{width:100%;border-collapse:collapse;font-size:13px}th,td{text-align:left;padding:4px 6px;border-bottom:1px solid var(--line);vertical-align:top}
+button.primary{border-color:var(--acc);color:var(--acc);font-weight:600}
+table{width:100%;border-collapse:collapse;font-size:13px}th,td{text-align:left;padding:5px 6px;border-bottom:1px solid var(--line);vertical-align:top}
+th{color:var(--mut);font-weight:600}td.n,th.n{text-align:right;font-variant-numeric:tabular-nums}
 .wrap{overflow-x:auto}.ok{color:var(--ok)}.bad{color:var(--bad)}.warn{color:var(--warn)}
 input,select{font:inherit;padding:5px 7px;border:1px solid var(--line);border-radius:6px;background:var(--bg);color:var(--fg)}
-input{width:110px}#msg{min-height:1.3em;margin:6px 0}
-.badge{display:inline-block;padding:1px 8px;border-radius:10px;font-size:12px;border:1px solid var(--line)}
-.big{font-size:18px;font-weight:600}
+input{width:110px}#msg{min-height:1.3em;margin:0 0 8px}
+.badge{display:inline-block;padding:1px 9px;border-radius:10px;font-size:12px;border:1px solid var(--line)}
+.big{font-size:17px;font-weight:600}
+.brief{font-size:14px;line-height:1.55;max-height:75vh;overflow:auto}.brief p{margin:0 0 10px}
 .switch{display:inline-flex;align-items:center;gap:10px;cursor:pointer;font-weight:600}
-.track{width:52px;height:28px;border-radius:14px;background:#b3261e;position:relative;transition:.2s}
+.track{width:52px;height:28px;border-radius:14px;background:#b3261e;position:relative;transition:.2s;flex:none}
 .track.on{background:#0a7d33}.knob{width:22px;height:22px;border-radius:50%;background:#fff;position:absolute;top:3px;left:3px;transition:.2s}
 .track.on .knob{left:27px}
 dialog{max-width:640px;border:1px solid var(--line);border-radius:10px;background:var(--card);color:var(--fg)}
@@ -26,84 +39,241 @@ dialog::backdrop{background:rgba(0,0,0,.5)}
 .confirm{border:2px solid var(--warn);border-radius:8px;padding:10px 12px;margin-top:8px;display:none}
 .confirm input{width:240px;text-transform:uppercase}
 .warnbox{border-left:4px solid var(--bad);padding:8px 12px;margin:8px 0;background:var(--bg)}
+.del{border-color:var(--bad);color:var(--bad)}.del.armed{background:var(--bad);color:#fff}
+.use{color:var(--ok);font-weight:600}
+.res{margin-top:8px;font-size:14px;padding:8px;border-radius:6px;display:none}
+.res.ok{background:rgba(10,125,51,.12);display:block;color:var(--fg)}.res.bad{background:rgba(179,38,30,.12);display:block;color:var(--fg)}
+.form{border-top:1px dashed var(--line);margin-top:10px;padding-top:6px;display:none}
+.form label{display:block;margin:6px 0 2px;font-size:14px}.form input{width:100%}
+.sub{font-size:13px;color:var(--mut);margin:0 0 8px}
 </style></head><body><main>
-<h1>Maj Vaj <span id="mode" class="badge">...</span></h1>
-<p class="mut">Freqtrade places the (paper) orders. Grok checks the news. Your money rules cap everything. <a id="back" href="/">&larr; Keys</a> &middot; <span id="ver"></span></p>
+<div class="top"><h1>Maj Vaj</h1><span id="mode" class="badge">...</span><span id="botline" class="mut"></span><span class="mut" style="margin-left:auto" id="ver"></span></div>
+<nav class="tabs" id="tabs">
+ <button data-t="desk" class="on">Desk</button><button data-t="freqai">FreqAI</button><button data-t="scout">Scout settings</button>
+ <button data-t="paper">Paper settings</button><button data-t="keys" id="tab-keys">Keys</button></nav>
 <div id="msg"></div>
 
-<div class="card"><h2>Bot</h2><div id="bot" class="mut">-</div>
-<div class="row" style="margin-top:10px"><span class="switch" id="modeswitch"><span class="track" id="track"><span class="knob"></span></span><span id="modelabel">Paper trading</span></span>
-<span id="modestate" class="mut"></span></div>
-<details style="margin-top:8px"><summary>Before going live (advice)</summary><ul id="ready" class="mut"></ul>
-<p class="mut">These are recommendations, not a lock: the decision is yours. Live needs only a trade-enabled Kraken key saved on the Keys page, the warning acknowledged and the typed phrase. Real orders use your real Kraken balance, capped by the bankroll in Money rules.</p></details></div>
+<!-- ============================== DESK ============================== -->
+<section class="tab on" id="t-desk"><div class="grid">
+<div>
+ <div class="card"><div class="stats">
+  <div class="stat"><b id="equity">-</b><span>Equity (USD)</span></div>
+  <div class="stat"><b id="pnl">-</b><span>Profit / loss, all time</span></div>
+  <div class="stat"><b id="cash">-</b><span>Cash (USD, not in trades)</span></div></div>
+  <div class="small"><span>Bankroll <b id="bankroll">-</b></span><span>Active <b id="active">-</b></span>
+   <span>Protected profit <b id="protected">-</b></span><span>Today <b id="today">-</b></span></div></div>
+ <div class="card"><div class="row"><span><b>Latest scout:</b> <span id="scoutline">-</span></span>
+  <button id="vnow" class="primary" style="margin-left:auto">Scout now</button></div>
+  <div class="mut" id="nextline"></div></div>
+ <div class="card"><h2>Open positions</h2><div class="wrap"><table id="open"></table></div></div>
+ <div class="card"><h2>Closed trades</h2><div class="wrap"><table id="closed"></table></div></div>
+ <div class="card"><h2>Recent decisions (Gate)</h2><div class="wrap"><table id="decisions"></table></div>
+  <p class="mut">Every time the model wants to enter, the bot checks the calendar, the fundamentals verdict and your money rules. Each answer is listed here.</p></div>
+</div>
+<div><div class="card"><h2>Market briefing</h2><div id="brief" class="brief mut">No briefing yet.</div></div></div>
+</div></section>
 
-<div class="card"><h2>Trading on / off</h2>
-<div class="row"><span class="switch" id="sw_trade"><span class="track" id="trk_trade"><span class="knob"></span></span><span id="sw_trade_txt">-</span></span></div>
-<div id="cbox" class="confirm"><div id="ctext"></div>
-<div class="row" style="margin-top:8px"><input id="cphrase" autocomplete="off" placeholder="type the phrase"><button id="cgo">Confirm</button><button id="ccancel">Cancel</button></div></div>
-<p class="mut">Asks for a typed phrase, so a stray click never changes anything. Pausing stops new trades only; open trades keep being managed. Your choice is kept across restarts. Everything else runs by itself: the bot trades, Grok checks on its schedule, the watchdog keeps it alive.</p></div>
+<!-- ============================== FREQAI ============================== -->
+<section class="tab" id="t-freqai">
+ <div class="card"><h2>Model</h2><div id="model" class="mut">-</div></div>
+ <div class="card"><h2>Training data: Kraken candle history</h2><div id="hist" class="mut">-</div>
+  <div class="row" style="margin-top:8px"><button id="hdl">Update history</button><span id="hmsg" class="mut"></span></div>
+  <p class="mut">The full Kraken history is kept in a database on this server; updating only adds what is new. The bot keeps its saved model between restarts and retrains it in the background on schedule.</p></div>
+ <div class="card"><h2>Outside data (stored point-in-time)</h2><div id="data" class="mut">-</div>
+  <div class="row" style="margin-top:8px"><button id="drefresh">Refresh now</button></div>
+  <p class="mut">Fear &amp; Greed and the FOMC calendar need no key; a FRED key (Keys tab) adds the CPI / jobs / PPI calendar and first-release macro values. Each value is used only after the moment it became public. The bot takes no new trades from 60 minutes before to 90 minutes after these events.</p></div>
+ <div class="card"><h2>Backtest</h2>
+  <div class="row"><label>Period <select id="btrange"></select></label><button id="btrun" class="primary">Run backtest</button><span id="btstate" class="mut"></span></div>
+  <p class="mut">Replays the real bot (FreqAI model, money rules, calendar gate, fees) over past candles. Grok's verdicts cannot be replayed honestly, so the backtest runs without them. It runs in the background on 1 CPU with its own model folder; the live bot keeps trading.</p>
+  <div class="wrap"><table id="btres"></table></div></div>
+</section>
+
+<!-- ============================== SCOUT ============================== -->
+<section class="tab" id="t-scout">
+ <div class="card"><h2>When Grok checks the fundamentals</h2>
+  <div class="row"><label>Times (UTC) <input id="v_times" style="width:220px"></label><button id="vsave">Save times</button><span id="vnext" class="mut"></span></div>
+  <p class="mut">Defaults: 00:00 Tokyo open, 07:00 London open, 13:30 New York pre-open / London overlap. Each verdict lasts until the next check plus one hour; if a check fails, the bot stands down when the old verdict runs out. Scout now (Desk tab) runs one immediately.</p></div>
+ <div class="card"><h2>Grok model</h2>
+  <div class="row"><label>Model <input id="g_model" style="width:180px"></label><button id="gsave">Save</button></div>
+  <p class="mut">Each check searches the web and X for news, scheduled events and sentiment, then turns that into NORMAL, CAUTION (half-size trades) or STAND DOWN (no new trades).</p></div>
+ <div class="card"><h2>Recent checks</h2><div class="wrap"><table id="vhist"></table></div></div>
+</section>
+
+<!-- ============================== PAPER ============================== -->
+<section class="tab" id="t-paper">
+ <div class="card"><h2>Paper or live</h2>
+  <div class="row"><span class="switch" id="modeswitch"><span class="track" id="track"><span class="knob"></span></span><span id="modelabel">Paper trading</span></span>
+  <span id="modestate" class="mut"></span></div>
+  <details style="margin-top:8px"><summary>Before going live (advice)</summary><ul id="ready" class="mut"></ul>
+  <p class="mut">These are recommendations, not a lock: the decision is yours. Live needs only a trade-enabled Kraken key in use (Keys tab), the warning acknowledged and the typed phrase. Real orders use your real Kraken balance, capped by the bankroll below.</p></details></div>
+ <div class="card"><h2>Trading on / off</h2>
+  <div class="row"><span class="switch" id="sw_trade"><span class="track" id="trk_trade"><span class="knob"></span></span><span id="sw_trade_txt">-</span></span></div>
+  <div id="cbox" class="confirm"><div id="ctext"></div>
+  <div class="row" style="margin-top:8px"><input id="cphrase" autocomplete="off" placeholder="type the phrase"><button id="cgo">Confirm</button><button id="ccancel">Cancel</button></div></div>
+  <p class="mut">Asks for a typed phrase, so a stray click never changes anything. Pausing stops new trades only; open trades keep being managed. Kept across restarts.</p></div>
+ <div class="card"><h2>Money rules</h2>
+  <div class="row">
+  <label>Bankroll (USD) <input id="m_bank" type="number" step="1"></label>
+  <label>Daily loss limit (%) <input id="m_loss" type="number" step="0.5"></label>
+  <label>Daily goal (USD, 0 = off) <input id="m_goal" type="number" step="1"></label>
+  <label>When reached <select id="m_mode"><option value="stop">stop new trades today</option><option value="opportunity">opportunity mode (careful extra trades)</option><option value="continue">keep trading normally</option></select></label>
+  </div><div class="row" style="margin-top:8px">
+  <label>Extra-trade size (%) <input id="m_red" type="number" min="1" max="99"></label>
+  <label>Keep at least (% of day's profit) <input id="m_keep" type="number" min="0" max="100"></label>
+  <span>Sessions:</span><label><input type="checkbox" class="m_s" value="Asia/Tokyo" style="width:auto"> Tokyo</label>
+  <label><input type="checkbox" class="m_s" value="London" style="width:auto"> London</label>
+  <label><input type="checkbox" class="m_s" value="London/New York overlap" style="width:auto"> London/NY overlap</label>
+  <label><input type="checkbox" class="m_s" value="New York" style="width:auto"> New York</label>
+  <label><input type="checkbox" class="m_s" value="Quiet (late US)" style="width:auto"> Late US</label>
+  </div><div class="row" style="margin-top:8px"><label>Time zone <input id="m_tz" style="width:170px"></label><button id="msave">Save</button></div>
+  <p class="mut">Winning trades' net profit is protected and never traded again; losses reduce the active bankroll. Open trades are always managed, whatever these settings say.
+  Opportunity mode, after the goal: one extra trade at a time, only in the ticked sessions, smaller, with a stronger signal and a NORMAL news verdict, sized so a loss can't take back more than you chose to give back.</p></div>
+ <div class="card"><h2>Reports</h2><div class="row"><button id="rev">Send evening report now</button><button id="rwk">Send weekly review now</button></div>
+  <pre id="rtext" class="mut" style="white-space:pre-wrap"></pre></div>
+</section>
+
+<!-- ============================== KEYS ============================== -->
+<section class="tab" id="t-keys">
+ <p class="mut"><b>Write-only key store.</b> Each service keeps a list of labeled keys; one is <b>in use</b>. Once saved, a key can never be shown again: the page only knows its label, when it was saved, and which parts are filled in. Keys stay in this server's private data folder and are only sent to the service they belong to.</p>
+ <div id="keys"></div>
+</section>
 
 <dialog id="dlg"><h2 id="dtitle"></h2><div class="warnbox" id="dwarn"></div><div id="dscope" class="mut"></div><ul id="dready" class="mut"></ul>
 <p><label>Type <b id="dphrase"></b> to confirm<br><input id="dtyped" style="width:100%" autocomplete="off"></label></p>
 <p><label><input type="checkbox" id="dack" style="width:auto"> I have read this warning (<span id="dver"></span>)</label></p>
 <div class="row"><button id="dcancel" autofocus>Cancel</button><button id="dok"></button></div><div id="dmsg" class="bad"></div></dialog>
 
-<div class="card"><div class="stats">
-<div class="stat"><b id="bankroll">-</b><span>Authorized bankroll</span></div>
-<div class="stat"><b id="active">-</b><span>Active (tradable)</span></div>
-<div class="stat"><b id="protected" class="ok">-</b><span>Protected profit (never traded)</span></div>
-<div class="stat"><b id="today">-</b><span>Today's net</span></div></div></div>
-
-<div class="card"><h2>Fundamentals verdict</h2><div id="verdict" class="big">-</div><div id="vreasons" class="mut"></div>
-<div class="row" style="margin-top:8px"><button id="vnow">Scout now</button>
-<label>Grok checks at (UTC) <input id="v_times" style="width:200px"></label><button id="vsave">Save times</button>
-<span id="vnext" class="mut"></span></div>
-<p class="mut">Grok only runs at these times (plus Scout now). Defaults: 00:00 Tokyo open, 07:00 London open, 13:30 New York pre-open / London overlap. Each verdict lasts until the next check plus one hour; if a check fails, the bot stands down when the old verdict runs out.</p>
-<details style="margin-top:8px"><summary>Recent checks</summary><div class="wrap"><table id="vhist"></table></div></details></div>
-
-<div class="card"><h2>Open trades</h2><div class="wrap"><table id="open"></table></div></div>
-
-<div class="card"><h2>Money rules</h2>
-<div class="row">
-<label>Bankroll (USD) <input id="m_bank" type="number" step="1"></label>
-<label>Daily loss limit (%) <input id="m_loss" type="number" step="0.5"></label>
-<label>Daily goal (USD, 0 = off) <input id="m_goal" type="number" step="1"></label>
-<label>When reached <select id="m_mode"><option value="stop">stop new trades today</option><option value="opportunity">opportunity mode (careful extra trades)</option><option value="continue">keep trading normally</option></select></label>
-</div><div class="row" id="oppbox" style="margin-top:8px">
-<label>Extra-trade size (%) <input id="m_red" type="number" min="1" max="99"></label>
-<label>Keep at least (% of day's profit) <input id="m_keep" type="number" min="0" max="100"></label>
-<span>Sessions:</span><label><input type="checkbox" class="m_s" value="Asia/Tokyo" style="width:auto"> Tokyo</label>
-<label><input type="checkbox" class="m_s" value="London" style="width:auto"> London</label>
-<label><input type="checkbox" class="m_s" value="London/New York overlap" style="width:auto"> London/NY overlap</label>
-<label><input type="checkbox" class="m_s" value="New York" style="width:auto"> New York</label>
-<label><input type="checkbox" class="m_s" value="Quiet (late US)" style="width:auto"> Late US</label>
-</div><div class="row" style="margin-top:8px">
-<label>Time zone <input id="m_tz" style="width:170px"></label>
-<button id="msave">Save</button></div>
-<p class="mut">Winning trades' net profit is protected and never traded again; losses reduce the active bankroll. Open trades are always managed, whatever these settings say.
-Opportunity mode, after the goal: one extra trade at a time, only in the ticked sessions, smaller, with a stronger signal and a NORMAL news verdict, sized so a loss can't take back more than you chose to give back.</p></div>
-
-<div class="card"><h2>Outside data (stored point-in-time)</h2><div id="data" class="mut">-</div>
-<div class="row" style="margin-top:8px"><button id="drefresh">Refresh now</button></div>
-<p class="mut">Fear &amp; Greed and the FOMC calendar need no key. Add a free FRED key on the Keys page for CPI / jobs / PPI release times and first-release macro values. The bot takes no new trades from 60 minutes before to 90 minutes after these events.</p></div>
-
-<div class="card"><h2>Reports</h2><div class="row"><button id="rev">Send evening report now</button><button id="rwk">Send weekly review now</button></div>
-<pre id="rtext" class="mut" style="white-space:pre-wrap"></pre></div>
-
 <script>
 const TOKEN=new URLSearchParams(location.search).get('t')||'';
-document.getElementById('back').href='/?t='+encodeURIComponent(TOKEN);
 const $=id=>document.getElementById(id);
-const esc=s=>String(s==null?'':s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
-const money=n=>n==null?'-':Number(n).toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2});
+const esc=s=>String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const money=n=>n==null||isNaN(n)?'-':Number(n).toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2});
+const signed=n=>n==null?'-':(n>=0?'+':'')+money(n);
+const num=(n,d)=>n==null?'-':Number(n).toLocaleString(undefined,{maximumFractionDigits:d==null?8:d});
 const when=t=>t?new Date(t*1000).toLocaleString():'-';
-async function api(path,body){
-  try{const r=await fetch('/api/majvaj/'+path,{method:body?'POST':'GET',headers:{'X-Desk-Token':TOKEN,'Content-Type':'application/json'},body:body?JSON.stringify(body):undefined});return await r.json();}
-  catch(e){return {ok:false,message:'Desk did not answer.'};}
+const iso=s=>s?new Date(String(s).replace(' ','T')+(String(s).match(/Z|[+-]\d\d:?\d\d$/)?'':'Z')).toLocaleString():'-';
+async function call(path,body){
+  const ctl=new AbortController();const timer=setTimeout(()=>ctl.abort(),60000);
+  try{const r=await fetch('/api/'+path,{method:body?'POST':'GET',headers:{'X-Desk-Token':TOKEN,'Content-Type':'application/json'},body:body?JSON.stringify(body):undefined,signal:ctl.signal});return await r.json();}
+  catch(e){return {ok:false,message:'Desk did not answer.'};}finally{clearTimeout(timer);}
 }
+const api=(p,b)=>call('majvaj/'+p,b);
 function say(r){$('msg').textContent=r.message||r.error||'';$('msg').className=r.ok?'ok':'bad';}
 const LABEL={normal:['NORMAL','ok'],caution:['CAUTION: half size','warn'],stand_down:['STAND DOWN: no new trades','bad']};
-let filled=false, lastMode=null, ctl=null, pending=null;
+
+// ---------------------------------------------------------------- tabs
+function showTab(t){document.querySelectorAll('#tabs button').forEach(b=>b.classList.toggle('on',b.dataset.t===t));
+  document.querySelectorAll('.tab').forEach(s=>s.classList.toggle('on',s.id==='t-'+t));
+  try{localStorage.setItem('mv_tab',t);}catch(e){}
+  if(t==='keys')loadKeys();if(t==='freqai')loadLab();}
+$('tabs').onclick=e=>{const b=e.target.closest('button');if(b)showTab(b.dataset.t);};
+
+// ---------------------------------------------------------------- briefing (Grok's digest, plain text with **bold** and [n](url))
+function briefHtml(text){
+  return esc(text).split(/\n{2,}/).map(p=>'<p>'+p
+    .replace(/\*\*(.+?)\*\*/g,'<b>$1</b>')
+    .replace(/\[\[(\d+)\]\]\((https?:\/\/[^)\s]+)\)/g,'<a href="$2" target="_blank" rel="noopener noreferrer">[$1]</a>')
+    .replace(/\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)/g,'<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>')
+    .replace(/\n/g,'<br>')+'</p>').join('');
+}
+
+// ---------------------------------------------------------------- main status
+let filled=false,lastMode=null,ctl=null,pending=null;
+async function refresh(){
+  const s=await api('status');
+  if(!s.ok){say(s);return;}
+  $('ver').textContent='version '+s.version;
+  const b=s.bot;ctl=s.control;
+  if(b.ok){
+    $('mode').textContent=b.dry_run?'PAPER':'LIVE (real money)';$('mode').className='badge '+(b.dry_run?'ok':'bad');
+    const age=b.last_process_ts?Math.round((s.now-b.last_process_ts)/60):null;
+    $('botline').innerHTML='bot <b>'+esc(b.state)+'</b> &middot; '+esc(b.strategy)+' '+esc(b.timeframe)+' &middot; last check '+(age==null?'-':age+' min ago')+
+      ' &middot; '+(b.closed_trades??0)+' closed (won '+(b.winning??0)+', lost '+(b.losing??0)+')';
+    $('botline').className=age!=null&&age>20?'bad':'mut';
+    const bal=b.balance||{};
+    $('equity').textContent=money(bal.equity);$('cash').textContent=money(bal.cash);
+    $('pnl').textContent=signed(b.profit_all);$('pnl').className=(b.profit_all||0)>=0?'ok':'bad';
+  }else{$('mode').textContent='bot not answering';$('mode').className='badge bad';$('botline').textContent=b.error;$('botline').className='bad';}
+  const k=s.books;
+  if(k){$('bankroll').textContent=money(k.bankroll);$('active').textContent=money(k.active);$('protected').textContent=money(k.protected);
+    $('today').textContent=signed(k.today_net);}
+  // latest scout + verdict
+  const v=s.verdict_file;let line='no verdict yet: the bot stands down';
+  if(v){const expired=s.now>=v.expires;const l=expired?['EXPIRED: the bot stands down','bad']:(LABEL[v.verdict]||['?','bad']);
+    line=when(v.made)+' &mdash; <span class="'+l[1]+'"><b>'+l[0]+'</b></span>'+(expired?'':' (valid until '+when(v.expires)+')');}
+  const lastTry=(s.verdicts||[])[0];
+  if(lastTry&&!lastTry.ok&&(!v||lastTry.ts>v.made))line+='<br><span class="bad">Last check '+when(lastTry.ts)+' failed: '+esc(lastTry.error)+'</span>';
+  $('scoutline').innerHTML=line;$('nextline').textContent='Next scheduled check: '+when(s.next_check)+' (your time)';
+  // briefing
+  const br=s.briefing;
+  if(br&&br.digest){$('brief').className='brief';
+    $('brief').innerHTML='<p class="mut">'+when(br.ts)+' &middot; verdict '+esc(br.verdict)+'</p>'+briefHtml(br.digest)+
+      ((br.sources||[]).length?'<p class="mut">Sources: '+br.sources.slice(0,12).map(u=>{let h=u;try{h=new URL(u).hostname;}catch(e){}return /^https?:/.test(u)?'<a href="'+esc(u)+'" target="_blank" rel="noopener noreferrer">'+esc(h)+'</a>':esc(u);}).join(' &middot; ')+'</p>':'');}
+  // open positions
+  const op=b.ok?b.open:[];
+  $('open').innerHTML='<tr><th>Pair</th><th class="n">Qty</th><th class="n">Value (USD)</th><th class="n">Entry</th><th class="n">Now</th><th class="n">Stop</th><th class="n">P/L</th><th>Opened</th></tr>'+
+    (op.length?op.map(t=>'<tr><td>'+esc(t.pair)+'</td><td class="n">'+num(t.amount,6)+'</td><td class="n"><b>'+money((t.amount||0)*(t.current_rate||0))+'</b></td><td class="n">'+num(t.open_rate,4)+'</td><td class="n">'+num(t.current_rate,4)+
+      '</td><td class="n">'+num(t.stop,4)+'</td><td class="n '+((t.profit_abs||0)>=0?'ok':'bad')+'">'+signed(t.profit_abs)+' ('+num(t.profit_pct,2)+'%)</td><td>'+iso(t.open_date)+'</td></tr>').join('')
+      :'<tr><td colspan="8" class="mut">None</td></tr>');
+  const cl=s.closed||[];
+  $('closed').innerHTML='<tr><th>Closed</th><th>Pair</th><th class="n">Qty</th><th class="n">Entry</th><th class="n">Exit</th><th>Why</th><th class="n">P/L</th></tr>'+
+    (cl.length?cl.map(t=>'<tr><td>'+iso(t.close_date)+'</td><td>'+esc(t.pair)+'</td><td class="n">'+num(t.amount,6)+'</td><td class="n">'+num(t.open_rate,4)+'</td><td class="n">'+num(t.close_rate,4)+
+      '</td><td>'+esc(t.exit_reason)+'</td><td class="n '+((t.profit_abs||0)>=0?'ok':'bad')+'">'+signed(t.profit_abs)+' ('+num(t.profit_pct,2)+'%)</td></tr>').join('')
+      :'<tr><td colspan="7" class="mut">None yet</td></tr>');
+  const dc=s.decisions||[];
+  $('decisions').innerHTML='<tr><th>Time</th><th>Pair</th><th>Result</th><th>Reason</th></tr>'+
+    (dc.length?dc.map(d=>'<tr><td>'+when(d.at)+'</td><td>'+esc(d.pair)+'</td><td class="'+(d.result==='approved'?'ok':'bad')+'">'+esc(d.result)+'</td><td>'+esc(d.reason)+'</td></tr>').join('')
+      :'<tr><td colspan="4" class="mut">None yet. The model has not wanted to enter since this list started.</td></tr>');
+  // scout tab
+  $('vnext').textContent='Next check: '+when(s.next_check)+' (your time)';
+  if(!$('v_times').dataset.f){$('v_times').dataset.f=1;$('v_times').value=(s.schedule||[]).join(', ');}
+  if(s.grok&&!$('g_model').dataset.f){$('g_model').dataset.f=1;$('g_model').value=s.grok.model;}
+  $('vhist').innerHTML='<tr><th>Time</th><th>Verdict</th><th>Reasons / problem</th></tr>'+(s.verdicts||[]).map(x=>'<tr><td>'+when(x.ts)+'</td><td>'+(x.ok?esc(x.verdict):'<span class="bad">failed</span>')+'</td><td>'+esc(x.ok?JSON.parse(x.reasons||'[]').join(' | '):x.error)+'</td></tr>').join('');
+  // paper tab
+  const st=b.ok&&b.state;
+  $('trk_trade').className='track'+(ctl.trading_wanted?' on':'');
+  $('sw_trade_txt').textContent='Trading: '+(ctl.trading_wanted?'ON':'PAUSED')+(st&&((st==='running')!==ctl.trading_wanted)?' (applying...)':'');
+  const md=s.mode;
+  if(md){const paper=(md.state.mode==='paper');$('track').className='track'+(paper?' on':'');
+    $('modelabel').textContent=paper?'Paper trading: ON':(md.state.mode==='live'?'Paper trading: OFF (LIVE, real money)':'Returning to paper (live-exit-only)');
+    $('modestate').textContent=(md.locked?'Live needs: '+md.blockers.join(' '):'Click the switch to change mode')+(md.state.since?' · mode since '+when(md.state.since):'');
+    $('ready').innerHTML=md.checks.map(c=>'<li class="'+(c.ok?'ok':'warn')+'">'+(c.ok?'✓ ':'not yet: ')+esc(c.name)+' — '+esc(c.detail)+'</li>').join('');
+    lastMode=md;}
+  if(!filled){filled=true;const m=s.money;$('m_bank').value=m.bankroll;$('m_loss').value=m.daily_loss_limit_pct;$('m_goal').value=m.daily_goal_usd;
+    $('m_mode').value=m.goal_mode;$('m_red').value=m.goal_reduce_pct;$('m_keep').value=m.goal_keep_pct;$('m_tz').value=m.timezone;
+    document.querySelectorAll('.m_s').forEach(c=>c.checked=(m.goal_sessions||[]).includes(c.value));}
+  window._data=s.data;renderData();
+}
+function renderData(){const dt=window._data;if(!dt)return;
+  $('data').innerHTML=(dt.fetches||[]).map(f=>esc(f.source)+': '+(f.ok?'<span class="ok">ok</span>':'<span class="bad">'+esc(f.message)+'</span>')+' ('+when(f.at)+')').join(' · ')+
+    '<br>Stored: '+Object.entries(dt.counts||{}).map(([k,v])=>esc(k)+' '+v).join(', ')+
+    '<br>Next events: '+((dt.upcoming||[]).map(e=>esc(e.name)+' '+when(e.at)).join(' · ')||'none known');}
+
+// ---------------------------------------------------------------- FreqAI tab
+async function loadLab(){
+  const s=await api('status');if(!s.ok)return;const L=s.lab;if(!L)return;
+  const m=L.model||{};
+  $('model').innerHTML='Model <b>'+esc(m.identifier||'-')+'</b> &middot; LightGBM on '+esc(m.timeframe||'-')+' candles ('+esc((m.timeframes||[]).join(', '))+') &middot; pairs '+esc((m.pairs||[]).join(', '))+
+    '<br>Last trained: <b>'+when(m.last_trained)+'</b> &middot; retrains every '+esc(m.retrain_hours)+' h in the background &middot; learns from the last '+esc(m.train_days)+' days &middot; predicts '+esc(m.label_candles)+' candles ahead';
+  if(!$('btrange').options.length)$('btrange').innerHTML=Object.entries(L.ranges).map(([k,v])=>'<option value="'+k+'">'+esc(v)+'</option>').join('');
+  const bt=L.backtest||{};let t='';
+  if(L.pending)t='Queued, starts within 2 minutes.';
+  else if(bt.status==='running')t='Running since '+when(bt.started)+' ('+esc(bt.label)+'). The page updates by itself.';
+  else if(bt.status==='done')t='Last run finished '+when(bt.finished)+' ('+esc(bt.label)+').';
+  else if(bt.status==='failed')t='Last run failed'+(bt.finished?' '+when(bt.finished):'')+'. '+esc(bt.message||'');
+  $('btstate').textContent=t;$('btstate').className=bt.status==='failed'?'bad':'mut';
+  const R=L.results||[];
+  $('btres').innerHTML='<tr><th>Period</th><th class="n">Trades</th><th class="n">Win %</th><th class="n">Bot profit</th><th class="n">Market (buy &amp; hold)</th><th class="n">Max drawdown</th><th>Model</th></tr>'+
+    (R.length?R.map(r=>r.error?'<tr><td colspan="7" class="bad">'+esc(r.file)+': '+esc(r.error)+'</td></tr>':
+     '<tr><td>'+esc((r.start||'').slice(0,10))+' to '+esc((r.end||'').slice(0,10))+'</td><td class="n">'+r.trades+'</td><td class="n">'+r.winrate_pct+'</td><td class="n '+(r.profit_pct>=0?'ok':'bad')+'">'+signed(r.profit_pct)+'% ('+signed(r.profit_usd)+')</td><td class="n">'+signed(r.market_pct)+'%</td><td class="n">'+r.max_drawdown_pct+'%</td><td class="mut">'+esc(r.model)+'</td></tr>').join('')
+     :'<tr><td colspan="7" class="mut">No backtests yet.</td></tr>');
+  const h=await call('history/status');
+  if(h.ok){$('hist').innerHTML=Object.entries(h.pairs||{}).map(([sym,p])=>'<b>'+esc(sym)+'</b>: '+num(p.rows,0)+' hourly candles, '+(p.first?new Date(p.first*1000).toLocaleDateString():'-')+' to '+(p.last?when(p.last):'-')).join('<br>')||'No history yet.';
+    $('hmsg').textContent=h.job&&h.job.message?h.job.message:'';$('hmsg').className=h.job&&h.job.ok===false?'bad':'mut';}
+  renderData();
+}
+
+// ---------------------------------------------------------------- paper / trading switches
 function ask(){
   const p=ctl.phrases,on=!ctl.trading_wanted;
   pending={on:on,phrase:on?p.resume:p.pause};
@@ -124,49 +294,6 @@ function openDialog(){
   $('dtyped').value='';$('dack').checked=false;$('dmsg').textContent='';$('dlg').dataset.to=toLive?'live':'paper';
   $('dlg').showModal();$('dcancel').focus();
 }
-async function refresh(){
-  const s=await api('status');
-  if(!s.ok){say(s);return;}
-  $('ver').textContent='version '+s.version;
-  ctl=s.control;
-  const live=b=>b&&b.ok&&b.state;const st=live(s.bot);
-  $('trk_trade').className='track'+(ctl.trading_wanted?' on':'');
-  $('sw_trade_txt').textContent='Trading: '+(ctl.trading_wanted?'ON':'PAUSED')+(st&&((st==='running')!==ctl.trading_wanted)?' (applying...)':'');
-  const b=s.bot;
-  if(b.ok){
-    $('mode').textContent=b.dry_run?'paper (dry-run)':'LIVE';$('mode').className='badge '+(b.dry_run?'ok':'bad');
-    const age=b.last_process_ts?Math.round((s.now-b.last_process_ts)/60):null;
-    $('bot').innerHTML='State <b>'+esc(b.state)+'</b> &middot; strategy '+esc(b.strategy)+' ('+esc(b.timeframe)+') &middot; last check '+(age==null?'-':age+' min ago')+
-      ' &middot; closed trades '+(b.closed_trades??0)+' (won '+(b.winning??0)+', lost '+(b.losing??0)+') &middot; all-time '+money(b.profit_all)+' USD';
-    $('bot').className=age!=null&&age>20?'bad':'';
-  }else{$('mode').textContent='bot not answering';$('mode').className='badge bad';$('bot').textContent=b.error;$('bot').className='bad';}
-  const md=s.mode;
-  if(md){const paper=(md.state.mode==='paper');$('track').className='track'+(paper?' on':'');
-    $('modelabel').textContent=paper?'Paper trading: ON':(md.state.mode==='live'?'Paper trading: OFF (LIVE, real money)':'Returning to paper (live-exit-only)');
-    $('modestate').textContent=(md.locked?'Live needs: '+md.blockers.join(' '):'Click the switch to change mode')+(md.state.since?' · mode since '+when(md.state.since):'');
-    $('ready').innerHTML=md.checks.map(c=>'<li class="'+(c.ok?'ok':'bad')+'">'+(c.ok?'✓ ':'✗ ')+esc(c.name)+' — '+esc(c.detail)+'</li>').join('');
-    lastMode=md;}
-  const dt=s.data;
-  if(dt){$('data').innerHTML=(dt.fetches||[]).map(f=>esc(f.source)+': '+(f.ok?'<span class="ok">ok</span>':'<span class="bad">'+esc(f.message)+'</span>')+' ('+when(f.at)+')').join(' · ')+
-    '<br>Stored: '+Object.entries(dt.counts||{}).map(([k,v])=>esc(k)+' '+v).join(', ')+
-    '<br>Next events: '+((dt.upcoming||[]).map(e=>esc(e.name)+' '+when(e.at)).join(' · ')||'none known');}
-  const k=s.books;
-  if(k){$('bankroll').textContent=money(k.bankroll);$('active').textContent=money(k.active);$('protected').textContent=money(k.protected);
-    $('today').textContent=(k.today_net>=0?'+':'')+money(k.today_net);$('today').className=k.today_net>=0?'ok':'bad';}
-  const v=s.verdict_file;
-  if(v){const expired=s.now>=v.expires;const l=expired?['EXPIRED: bot stands down','bad']:(LABEL[v.verdict]||['?','bad']);
-    $('verdict').textContent=l[0];$('verdict').className='big '+l[1];
-    $('vreasons').textContent=(v.reasons||[]).join(' | ')+'  (made '+when(v.made)+', valid until '+when(v.expires)+')';}
-  else{$('verdict').textContent='No verdict yet: bot stands down';$('verdict').className='big bad';}
-  $('vnext').textContent='Next check: '+when(s.next_check)+' (your time)';
-  if(!$('v_times').dataset.f){$('v_times').dataset.f=1;$('v_times').value=(s.schedule||[]).join(', ');}
-  $('vhist').innerHTML='<tr><th>Time</th><th>Verdict</th><th>Reasons / problem</th></tr>'+(s.verdicts||[]).map(x=>'<tr><td>'+when(x.ts)+'</td><td>'+(x.ok?esc(x.verdict):'<span class="bad">failed</span>')+'</td><td>'+esc(x.ok?JSON.parse(x.reasons||'[]').join(' | '):x.error)+'</td></tr>').join('');
-  const op=b.ok?b.open:[];
-  $('open').innerHTML='<tr><th>Pair</th><th>Stake</th><th>Entry</th><th>Now</th><th>P/L</th><th>Opened</th></tr>'+(op.length?op.map(t=>'<tr><td>'+esc(t.pair)+'</td><td>'+money(t.stake)+'</td><td>'+esc(t.open_rate)+'</td><td>'+esc(t.current_rate)+'</td><td class="'+((t.profit_abs||0)>=0?'ok':'bad')+'">'+money(t.profit_abs)+' ('+(t.profit_pct??0)+'%)</td><td>'+esc(t.open_date)+'</td></tr>').join(''):'<tr><td colspan="6" class="mut">None</td></tr>');
-  if(!filled){filled=true;const m=s.money;$('m_bank').value=m.bankroll;$('m_loss').value=m.daily_loss_limit_pct;$('m_goal').value=m.daily_goal_usd;
-    $('m_mode').value=m.goal_mode;$('m_red').value=m.goal_reduce_pct;$('m_keep').value=m.goal_keep_pct;$('m_tz').value=m.timezone;
-    document.querySelectorAll('.m_s').forEach(c=>c.checked=(m.goal_sessions||[]).includes(c.value));}
-}
 $('msave').onclick=async()=>{say(await api('money',{bankroll:$('m_bank').value,daily_loss_limit_pct:$('m_loss').value,daily_goal_usd:$('m_goal').value,
   goal_mode:$('m_mode').value,goal_reduce_pct:$('m_red').value,goal_keep_pct:$('m_keep').value,timezone:$('m_tz').value.trim(),
   goal_sessions:[...document.querySelectorAll('.m_s')].filter(c=>c.checked).map(c=>c.value)}));refresh();};
@@ -174,14 +301,89 @@ $('modeswitch').onclick=openDialog;
 $('dcancel').onclick=()=>$('dlg').close();
 $('dok').onclick=async()=>{const r=await api('mode',{to:$('dlg').dataset.to,phrase:$('dtyped').value,ack:$('dack').checked});
   if(r.ok){$('dlg').close();say(r);refresh();}else{$('dmsg').textContent=r.message||'Refused.';}};
-$('drefresh').onclick=async()=>say(await api('data_refresh',{}));
-$('vsave').onclick=async()=>{say(await api('schedule',{times:$('v_times').value}));refresh();};
 $('sw_trade').onclick=()=>ctl&&ask();
 $('ccancel').onclick=()=>{$('cbox').style.display='none';pending=null;say({ok:true,message:'Cancelled. Nothing changed.'});};
 $('cgo').onclick=async()=>{if(!pending)return;const r=await api('trading',{on:pending.on,confirm:$('cphrase').value});
   say(r);if(r.ok){$('cbox').style.display='none';pending=null;}refresh();};
 $('vnow').onclick=async()=>say(await api('verdict_now',{}));
+$('vsave').onclick=async()=>{say(await api('schedule',{times:$('v_times').value}));refresh();};
+$('gsave').onclick=async()=>say(await api('grok',{model:$('g_model').value}));
+$('drefresh').onclick=async()=>say(await api('data_refresh',{}));
+$('hdl').onclick=async()=>{say(await call('history/download',{}));setTimeout(loadLab,1500);};
+$('btrun').onclick=async()=>{say(await api('backtest',{range:$('btrange').value}));loadLab();};
 $('rev').onclick=async()=>{const r=await api('report_now',{kind:'evening'});say(r);$('rtext').textContent=r.text||'';};
 $('rwk').onclick=async()=>{const r=await api('report_now',{kind:'weekly'});say(r);$('rtext').textContent=r.text||'';};
-refresh();setInterval(refresh,10000);
+
+// ---------------------------------------------------------------- Keys tab
+const SERVICES=[
+ {id:'kraken',title:'Kraken (read-only, for paper)',sub:'Permissions: Query Funds only. No trading, no withdrawals.',
+  fields:[['kraken_key','API key'],['kraken_secret','API secret']],extra:[['kraken_public','Test public data']]},
+ {id:'kraken_trade',title:'Kraken trade key (only for LIVE trading)',sub:'Permissions: Query Funds, Query Open/Closed Orders & Trades, Create & Modify Orders, Cancel/Close Orders. NEVER Withdraw. Best: restrict it to this server\'s IP.',
+  fields:[['kraken_trade_key','API key'],['kraken_trade_secret','API secret']]},
+ {id:'grok',title:'Grok (xAI)',sub:'Fundamentals research (news, X).',fields:[['grok_key','API key']]},
+ {id:'fred',title:'FRED (St. Louis Fed)',sub:'Optional, free: macro data and the CPI / jobs / PPI release calendar.',fields:[['fred_key','API key']]},
+ {id:'telegram_desk',title:'Telegram: Desk bot (reports)',sub:'After adding, message the bot in Telegram, then press Find chat ID.',
+  fields:[['telegram_desk_token','Bot token'],['telegram_desk_chat_id','Chat ID (optional, found automatically)']],chat:true},
+ {id:'telegram_recovery',title:'Telegram: Recovery bot (alerts)',sub:'After adding, message the bot in Telegram, then press Find chat ID.',
+  fields:[['telegram_recovery_token','Bot token'],['telegram_recovery_chat_id','Chat ID (optional, found automatically)']],chat:true}];
+let KEYS={};const armed={};
+function kshow(svc,res){const e=$('res-'+svc);e.textContent=res.message||res.error||'No answer';e.className='res '+(res.ok?'ok':'bad');}
+function formHtml(svc,mode){
+  return '<label>Label<input id="f-'+svc.id+'-label" autocomplete="off" placeholder="e.g. Main account"></label>'+
+    svc.fields.map(([f,l])=>'<label>'+esc(l)+(mode==='edit'?' (leave empty to keep)':'')+'<input id="f-'+svc.id+'-'+f+'" type="password" autocomplete="off" placeholder="paste here"></label>').join('')+
+    '<button data-a="'+mode+'-save">'+(mode==='add'?'Save new key':'Save changes')+'</button> <button data-a="cancel">Cancel</button>';
+}
+function openForm(svc,mode,id){
+  const f=$('form-'+svc.id);f.dataset.id=id||'';f.innerHTML=formHtml(svc,mode);f.style.display='block';
+  if(mode==='edit'){const k=(KEYS[svc.id]||[]).find(x=>x.id===id);$('f-'+svc.id+'-label').value=k?k.label:'';}
+  $('f-'+svc.id+'-label').focus();
+}
+function closeForm(svc){const f=$('form-'+svc.id);f.style.display='none';f.innerHTML='';}
+function renderKeys(){
+  for(const svc of SERVICES){
+    const list=KEYS[svc.id]||[];
+    $('list-'+svc.id).innerHTML=list.length?'<table><tr><th>Label</th><th>Saved</th><th>Status</th><th></th></tr>'+list.map(k=>
+      '<tr><td>'+esc(k.label)+(Object.entries(k.filled).every(([f,v])=>v||f.endsWith('_chat_id'))?'':' <span class="mut">(incomplete)</span>')+(svc.chat&&!k.filled[svc.id+'_chat_id']?' <span class="mut">(no chat ID yet)</span>':'')+'</td>'+
+      '<td class="mut">'+(k.saved_at?when(k.saved_at):'-')+'</td>'+
+      '<td>'+(k.active?'<span class="use">in use</span>':'<button data-a="use" data-id="'+k.id+'">Use</button>')+'</td>'+
+      '<td><button data-a="test" data-id="'+k.id+'">Test</button> '+(svc.chat?'<button data-a="chat" data-id="'+k.id+'">Find chat ID</button> ':'')+
+      '<button data-a="edit" data-id="'+k.id+'">Rename / replace</button> <button data-a="del" class="del" data-id="'+k.id+'">Delete</button></td></tr>').join('')+'</table>'
+      :'<p class="mut">No keys saved.</p>';
+  }
+}
+async function loadKeys(){const r=await call('keys');if(r.ok){KEYS=r.services;renderKeys();}}
+async function kact(svc,a,btn){
+  const id=btn.dataset.id;
+  if(a==='add'){openForm(svc,'add');return;}
+  if(a==='cancel'){closeForm(svc);return;}
+  if(a==='edit'){openForm(svc,'edit',id);return;}
+  if(a==='add-save'||a==='edit-save'){
+    const vals={};for(const [f] of svc.fields){const v=$('f-'+svc.id+'-'+f).value.trim();if(v)vals[f]=v;}
+    const label=$('f-'+svc.id+'-label').value;
+    const r=a==='add-save'?await call('keys/add',{service:svc.id,label:label,values:vals})
+                          :await call('keys/edit',{id:$('form-'+svc.id).dataset.id,label:label,values:vals});
+    kshow(svc.id,r);if(r.ok)closeForm(svc);loadKeys();return;}
+  if(a==='del'){
+    if(!armed[id]){armed[id]=setTimeout(()=>{armed[id]=0;btn.classList.remove('armed');btn.textContent='Delete';},5000);
+      btn.classList.add('armed');btn.textContent='Click again to delete';return;}
+    clearTimeout(armed[id]);armed[id]=0;kshow(svc.id,await call('keys/delete',{id:id}));loadKeys();return;}
+  if(a==='use'){kshow(svc.id,await call('keys/use',{id:id}));loadKeys();return;}
+  if(a==='test'){kshow(svc.id,{ok:true,message:'Testing...'});kshow(svc.id,await call('keys/test',{id:id}));return;}
+  if(a==='chat'){kshow(svc.id,await call('keys/find_chat',{id:id}));loadKeys();return;}
+  if(a==='extra'){kshow(svc.id,{ok:true,message:'Testing...'});kshow(svc.id,await call('test/'+btn.dataset.n,{}));return;}
+}
+for(const svc of SERVICES){
+  const d=document.createElement('div');d.className='card';
+  d.innerHTML='<h2>'+esc(svc.title)+'</h2><p class="sub">'+esc(svc.sub)+'</p><div id="list-'+svc.id+'"></div>'+
+    '<div class="row" style="margin-top:8px"><button data-a="add">+ Add key</button>'+(svc.extra||[]).map(([n,l])=>'<button data-a="extra" data-n="'+n+'">'+esc(l)+'</button>').join('')+'</div>'+
+    '<div class="form" id="form-'+svc.id+'"></div><div id="res-'+svc.id+'" class="res"></div>';
+  d.addEventListener('click',e=>{const b=e.target.closest('button');if(b&&b.dataset.a)kact(svc,b.dataset.a,b);});
+  $('keys').appendChild(d);
+}
+
+// ---------------------------------------------------------------- start
+let first='desk';try{first=localStorage.getItem('mv_tab')||'desk';}catch(e){}
+if(!$('t-'+first))first='desk';
+showTab(first);refresh();
+setInterval(()=>{refresh();if($('t-freqai').classList.contains('on'))loadLab();},15000);
 </script></main></body></html>
