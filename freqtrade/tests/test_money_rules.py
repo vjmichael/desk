@@ -139,3 +139,53 @@ class SettingsFromConfigTests(unittest.TestCase):
         self.assertTrue(S._trend_filter(self.stub({})))
         self.assertFalse(S._trend_filter(self.stub({"majvaj_trend_filter": False})))
         self.assertTrue(S._trend_filter(self.stub({"majvaj_trend_filter": "no"})))           # unclear: keep the safe filter on
+
+
+class PlanTradeTests(unittest.TestCase):
+    """Trades the Desk opens for approved plans use the plan's stop, target and expiry."""
+    def setUp(self):
+        from types import SimpleNamespace
+        self.tmp = tempfile.TemporaryDirectory()
+        self.path = os.path.join(self.tmp.name, "plans_active.json")
+        json.dump({"plans": {"plan-5": {"pair": "BTC/USD", "stop": 97.0, "target": 106.0, "expires": 2_000_000_000}}},
+                  open(self.path, "w"))
+        self.stub = SimpleNamespace(config={"majvaj_plans_file": self.path})
+        from MajVajFreqAI import MajVajFreqAI as S
+        self.S = S
+        self.stub._plan = lambda trade: S._plan(self.stub, trade)
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def trade(self, tag, pair="BTC/USD"):
+        from types import SimpleNamespace
+        return SimpleNamespace(enter_tag=tag, pair=pair)
+
+    def test_exit_reason(self):
+        from MajVajFreqAI import plan_exit_reason
+        p = {"target": 106.0, "expires": 1000}
+        self.assertEqual(plan_exit_reason(p, 106.0, 10), "plan_target")
+        self.assertEqual(plan_exit_reason(p, 100.0, 1000), "plan_expired")
+        self.assertIsNone(plan_exit_reason(p, 100.0, 10))
+        self.assertIsNone(plan_exit_reason({"target": "x"}, 100.0, 10))
+
+    def test_stop_target_and_model_exit_for_plan_trades_only(self):
+        now = datetime(2026, 11, 23, tzinfo=timezone.utc)
+        plan_trade, other = self.trade("plan-5"), self.trade("model")
+        sl = self.S.custom_stoploss(self.stub, "BTC/USD", plan_trade, now, 100.0, 0.0, False)
+        self.assertAlmostEqual(sl, 0.03, places=4)                                   # 3% below 100 = the plan's 97
+        self.assertIsNone(self.S.custom_stoploss(self.stub, "BTC/USD", other, now, 100.0, 0.0, False))
+        self.assertIsNone(self.S.custom_stoploss(self.stub, "ETH/USD", self.trade("plan-5", "ETH/USD"), now, 100.0, 0, False))
+        self.assertEqual(self.S.custom_exit(self.stub, "BTC/USD", plan_trade, now, 106.5, 0.06), "plan_target")
+        self.assertIsNone(self.S.custom_exit(self.stub, "BTC/USD", plan_trade, now, 101, 0.01))
+        args = dict(order_type="limit", amount=1, time_in_force="GTC", current_time=now)
+        self.assertFalse(self.S.confirm_trade_exit(self.stub, "BTC/USD", plan_trade, rate=101, exit_reason="exit_signal", **args))
+        self.assertTrue(self.S.confirm_trade_exit(self.stub, "BTC/USD", plan_trade, rate=101, exit_reason="stop_loss", **args))
+        self.assertTrue(self.S.confirm_trade_exit(self.stub, "BTC/USD", other, rate=101, exit_reason="exit_signal", **args))
+
+    def test_missing_plan_file_falls_back_to_the_normal_stop(self):
+        from types import SimpleNamespace
+        stub = SimpleNamespace(config={"majvaj_plans_file": "/nonexistent/plans.json"})
+        stub._plan = lambda trade: self.S._plan(stub, trade)
+        now = datetime(2026, 11, 23, tzinfo=timezone.utc)
+        self.assertIsNone(self.S.custom_stoploss(stub, "BTC/USD", self.trade("plan-5"), now, 100.0, 0.0, False))

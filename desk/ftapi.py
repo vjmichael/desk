@@ -1,9 +1,12 @@
 """Small client for Freqtrade's REST API (http://127.0.0.1:8080/api/v1).
 
-Desk only reads. The two control calls (pause, start) exist for the watchdog and the
-Recovery bot, and both are reversible: pause stops new entries and leaves open trades managed."""
+Desk mostly reads. The control calls (pause, start) exist for the watchdog and the Recovery bot, and both are
+reversible: pause stops new entries and leaves open trades managed. force_enter asks the bot to open a trade for an
+approved trade plan; the plans module only calls it while the bot is in paper (dry-run) mode, and the bot's own
+gates (news verdict, event windows, money rules, trained model) still decide whether the entry happens."""
 import base64
 import json
+import urllib.parse
 
 from . import net
 
@@ -57,6 +60,25 @@ class FreqtradeAPI:
 
     def trades(self, limit=50):
         return self._call("GET", "/trades?limit=%d" % int(limit))
+
+    def pair_candles(self, pair, timeframe, limit=2):
+        """The bot's analysed candles (includes the model's prediction columns)."""
+        return self._call("GET", "/pair_candles?pair=%s&timeframe=%s&limit=%d" % (
+            urllib.parse.quote(pair, safe=""), urllib.parse.quote(timeframe, safe=""), int(limit)))
+
+    def force_enter(self, pair, entry_tag):
+        """Ask the bot to open a long trade now. Returns (ok, info); info has trade_id or error."""
+        body = json.dumps({"pair": pair, "side": "long", "entry_tag": entry_tag}).encode()
+        try:
+            status, data = self.http("POST", self.url + "/forceenter", self.headers, body, 30)
+        except net.NetError as e:
+            return False, {"error": "bot not reachable: %s" % e}
+        if status == 200 and isinstance(data, dict) and data.get("trade_id") is not None:
+            return True, {"trade_id": data.get("trade_id")}
+        msg = ""
+        if isinstance(data, dict):
+            msg = str(data.get("error") or data.get("detail") or data.get("status") or "")
+        return False, {"error": msg or "HTTP %s" % status}
 
     def balance(self):
         return self._call("GET", "/balance")

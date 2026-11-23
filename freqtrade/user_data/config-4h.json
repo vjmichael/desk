@@ -42,7 +42,7 @@
             "method": "StaticPairList"
         }
     ],
-    "force_entry_enable": false,
+    "force_entry_enable": true,
     "initial_state": "running",
     "internals": {
         "process_throttle_secs": 5

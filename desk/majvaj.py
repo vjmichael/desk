@@ -21,6 +21,8 @@ from .verdict import VerdictService, write_atomic
 from .freqailab import Lab
 from .pairs import Pairs, coins_text, selection
 from .strategysettings import StrategySettings
+from .plans import Plans
+from .pairs import applied as applied_pairs
 
 GOAL_MODES = ("continue", "stop", "opportunity")
 SESSION_NAMES = ("Asia/Tokyo", "London", "London/New York overlap", "New York", "Quiet (late US)")
@@ -180,6 +182,8 @@ class MajVaj:
         self.lab = Lab(os.path.dirname(self.mv_dir), clock=clock)
         self.pairs = Pairs(store.dir, os.path.dirname(self.mv_dir), clock=clock)
         self.strategy = StrategySettings(self.mv_dir, os.path.join(os.path.dirname(self.mv_dir), "config-4h.json"), clock=clock)
+        self.plans = Plans(store.dir, self.mv_dir, self.ft, self.market, lambda: store.get("grok_key"),
+                           lambda: settings_fn().grok_model, self.notifier, self.plan_context, clock=clock)
         self.stop_event, self.thread = threading.Event(), None
 
     # ------------------------------------------------------------ mode (paper / live)
@@ -372,14 +376,15 @@ class MajVaj:
                 current = json.load(f)
         except (OSError, ValueError):
             current = None
-        closed = []
+        closed, raw_closed = [], []
         if bot.get("ok"):
             try:
+                raw_closed = self.closed_trades()
                 closed = [{"pair": t.get("pair"), "open_date": t.get("open_date"), "close_date": t.get("close_date"),
                            "open_rate": t.get("open_rate"), "close_rate": t.get("close_rate"), "amount": t.get("amount"),
                            "profit_abs": t.get("close_profit_abs"), "profit_pct": t.get("close_profit_pct"),
                            "exit_reason": t.get("exit_reason")}
-                          for t in sorted(self.closed_trades(), key=lambda t: t.get("close_timestamp") or 0, reverse=True)[:25]]
+                          for t in sorted(raw_closed, key=lambda t: t.get("close_timestamp") or 0, reverse=True)[:25]]
             except FtError:
                 pass
         brief = None
@@ -396,6 +401,7 @@ class MajVaj:
         return {"bot": bot, "books": books, "money": self.money(), "verdict_file": current, "closed": closed,
                 "trading": trading,
                 "decisions": self.decisions(), "briefing": brief, "grok": self.grok_settings(), "lab": self.lab.status(), "strategy": self.strategy.status(),
+                "plans": self.plans.status(model_trades=raw_closed), "model_view": self.model_view(bot),
                 "latest_verdict": latest, "verdicts": self.verdicts.history(limit=25), "now": self.clock(),
                 "schedule": self.verdicts.schedule_text(), "next_check": self.verdicts.next_check(),
                 "mode": self.mode_info(bot), "data": self.econ.status(),
@@ -470,6 +476,7 @@ class MajVaj:
                  "Open: %s" % (", ".join("%s %+.2f%%" % (t["pair"], (t.get("profit_pct") or 0)) for t in bot["open"]) or "none"),
                  "Fundamentals today: %s%s" % (", ".join("%s x%d" % kv for kv in counts.items()) or "no verdicts",
                                                 (" | %d failed checks" % fails) if fails else "")]
+        lines += self.plans.report_lines(now - 86400)
         return "\n".join(lines)
 
     def weekly_review(self, now=None):
@@ -504,6 +511,7 @@ class MajVaj:
             lines.append("If stand-down periods were not worse than normal ones, Grok's vetoes are not yet earning their keep.")
         else:
             lines.append("No verdict data to evaluate this week.")
+        lines += self.plans.report_lines(week)
         return "\n".join(lines)
 
     def _report_tick(self):
@@ -520,6 +528,60 @@ class MajVaj:
             self.verdicts._meta("weekly_sent", key)
             self.notifier.desk(self.weekly_review())
 
+    # ------------------------------------------------------------ trade plans
+    def plan_context(self):
+        """What the plan gate and executor need to know right now."""
+        bot = self.ft.summary()
+        try:
+            with open(self.cfg["verdict_file"], "r", encoding="utf-8") as f:
+                v = json.load(f)
+            verdict = v.get("verdict") if self.clock() < float(v.get("expires") or 0) else "expired"
+        except (OSError, ValueError, TypeError):
+            verdict = None
+        try:
+            ev = self.econ.event_window()
+            event = ev[0] if ev else None
+        except Exception:
+            event = None
+        latest = self.verdicts.latest() or {}
+        return {"whitelist": applied_pairs(os.path.dirname(self.mv_dir)), "verdict": verdict, "event": event,
+                "stop_limit_pct": self.strategy.load()["stop_loss_pct"], "brief": latest.get("digest") or "",
+                "dry_run_ok": bool(bot.get("ok") and bot.get("dry_run") is True),
+                "trading_wanted": bool(self.wanted_trading() and bot.get("ok") and bot.get("state") == "running")}
+
+    def _plans_tick(self):
+        self.plans.tick()
+        if self.plans.settings()["enabled"]:
+            latest = self.verdicts.latest()
+            if latest and str(latest["id"]) != (self.plans._meta("last_verdict_id") or ""):
+                self.plans._meta("last_verdict_id", latest["id"])
+                threading.Thread(target=self.plans.run, args=("after the scout check", latest["id"]),
+                                 daemon=True, name="plans").start()
+        self.plans.fill_hindsight(2)
+
+    def plan_now(self):
+        if not self.plans.settings()["enabled"]:
+            return {"ok": False, "message": "Trade plans are turned off."}
+        if self.plans.run_lock.locked():
+            return {"ok": False, "message": "A plan round is already running."}
+        threading.Thread(target=self.plans.run, args=("by you",), daemon=True, name="plans").start()
+        return {"ok": True, "message": "Grok is writing plans now; they appear here in a minute or two."}
+
+    def model_view(self, bot=None):
+        bot = bot or self.ft.summary()
+        if not bot.get("ok"):
+            return []
+        from .plans import model_view as mv_of
+        out = []
+        threshold = self.strategy.load()["entry_threshold_pct"]
+        for pair in applied_pairs(os.path.dirname(self.mv_dir)):
+            try:
+                pred, trusted = mv_of(self.ft.pair_candles(pair, bot.get("timeframe") or "4h", 2))
+            except Exception:
+                pred, trusted = None, None
+            out.append({"pair": pair, "predicted_pct": pred, "trusted": trusted, "needs_pct": threshold})
+        return out
+
     # ------------------------------------------------------------ run
     def start(self):
         if not os.path.exists(self.money_file):
@@ -531,7 +593,7 @@ class MajVaj:
 
     def _loop(self):
         while not self.stop_event.is_set():
-            for job in (self.enforce_control, self._report_tick):
+            for job in (self.enforce_control, self._report_tick, self._plans_tick):
                 try:
                     job()
                 except Exception:

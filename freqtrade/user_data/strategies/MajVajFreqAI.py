@@ -46,7 +46,7 @@ from technical import qtpylib
 
 from freqtrade.enums import RunMode
 from freqtrade.persistence import Trade
-from freqtrade.strategy import IStrategy
+from freqtrade.strategy import IStrategy, stoploss_from_absolute
 
 logger = logging.getLogger(__name__)
 VERDICT_FILE = "/freqtrade/user_data/majvaj/verdict.json"
@@ -66,6 +66,7 @@ SERIES_FILE = "/freqtrade/user_data/majvaj/series.csv"
 EVENT_BEFORE_MIN, EVENT_AFTER_MIN = 60, 90
 DECISIONS_FILE = "/freqtrade/user_data/majvaj/decisions.jsonl"
 DECISIONS_MAX_BYTES = 1_000_000
+PLANS_FILE = "/freqtrade/user_data/majvaj/plans_active.json"
 _cache = {}
 
 
@@ -105,6 +106,29 @@ def _cached(path, loader):
         return None
     _cache[path] = (mtime, value)
     return value
+
+
+def load_plans(path):
+    """Active trade plans written by the Desk: {"plan-12": {"pair", "stop", "target", "expires"}}. Empty if none."""
+    def read(p):
+        with open(p, "r", encoding="utf-8") as f:
+            data = json.load(f).get("plans") or {}
+        return {k: v for k, v in data.items() if isinstance(v, dict)}
+    return _cached(path, read) or {}
+
+
+def plan_exit_reason(plan, rate, now_ts):
+    """Why a plan trade should be sold now, or None. Target reached, or the plan's time is up."""
+    try:
+        target = float(plan.get("target") or 0)
+        expires = float(plan.get("expires") or 0)
+    except (TypeError, ValueError):
+        return None
+    if target > 0 and rate >= target:
+        return "plan_target"
+    if expires > 0 and now_ts >= expires:
+        return "plan_expired"
+    return None
 
 
 def load_events(path):
@@ -360,6 +384,45 @@ class MajVajFreqAI(IStrategy):
         path = self.config.get("majvaj_verdict_file", VERDICT_FILE)
         now = current_time.timestamp() if self.config.get("majvaj_gate_force") else time.time()
         return read_verdict(path, now)
+
+    # ---------------------------------------------------------------- trade plans (Grok CHART, checked by the Desk)
+    # A trade the Desk opened for an approved plan carries the tag "plan-<id>". Its stop, target and expiry come from
+    # the plan. If the plan file is missing or unreadable, the trade simply keeps the strategy's own stop and exits.
+    use_custom_stoploss = True
+
+    def _plan(self, trade):
+        tag = str(getattr(trade, "enter_tag", "") or "")
+        if not tag.startswith("plan-"):
+            return None
+        plan = load_plans(self.config.get("majvaj_plans_file", PLANS_FILE)).get(tag)
+        if not plan or plan.get("pair") not in (None, trade.pair):
+            return None
+        return plan
+
+    def custom_stoploss(self, pair: str, trade, current_time: datetime, current_rate: float, current_profit: float,
+                        after_fill: bool, **kwargs):
+        plan = self._plan(trade)
+        try:
+            stop = float(plan.get("stop") or 0) if plan else 0.0
+        except (TypeError, ValueError):
+            stop = 0.0
+        if stop <= 0 or current_rate <= 0:
+            return None            # not a plan trade: keep the normal stop
+        # Freqtrade only ever tightens a stop, so a plan stop wider than the strategy's stop has no effect;
+        # the Desk's gate rejects such plans before they are traded.
+        return stoploss_from_absolute(stop, current_rate, is_short=False)
+
+    def custom_exit(self, pair: str, trade, current_time: datetime, current_rate: float, current_profit: float, **kwargs):
+        plan = self._plan(trade)
+        return plan_exit_reason(plan, current_rate, current_time.timestamp()) if plan else None
+
+    def confirm_trade_exit(self, pair: str, trade, order_type: str, amount: float, rate: float, time_in_force: str,
+                           exit_reason: str, current_time: datetime, **kwargs) -> bool:
+        # The model's own exit signal does not close a plan trade early; the plan's stop, target or expiry does.
+        plan = self._plan(trade)
+        if plan and exit_reason == "exit_signal":
+            return plan_exit_reason(plan, rate, current_time.timestamp()) is not None
+        return True
 
     def confirm_trade_entry(self, pair: str, order_type: str, amount: float, rate: float, time_in_force: str,
                             current_time: datetime, entry_tag, side: str, **kwargs) -> bool:

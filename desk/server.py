@@ -252,6 +252,16 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send(200, mv.set_trading(bool(body.get("on")), body.get("confirm")))
             if action == "pairs":
                 return self._send(200, mv.pairs.apply(body.get("pairs"), mv.money(), self.server.research, mv.notifier.recovery))
+            if action == "plans_settings":
+                return self._send(200, mv.plans.save_settings(body))
+            if action == "plan_now":
+                return self._send(200, mv.plan_now())
+            if action == "plan_decide":
+                try:
+                    pid = int(body.get("id"))
+                except (TypeError, ValueError):
+                    return self._send(400, {"ok": False, "error": "bad plan id"})
+                return self._send(200, mv.plans.decide(pid, bool(body.get("approve"))))
             if action == "strategy":
                 return self._send(200, mv.save_strategy(body))
             if action == "restart":

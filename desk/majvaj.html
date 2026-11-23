@@ -71,6 +71,15 @@ dialog::backdrop{background:rgba(0,0,0,.5)}
   <div class="mut" id="nextline"></div></div>
  <div class="card"><h2>Open positions</h2><div class="wrap"><table id="open"></table></div></div>
  <div class="card"><h2>Closed trades</h2><div class="wrap"><table id="closed"></table></div></div>
+ <div class="card"><h2>Trade plans (Grok writes, the desk checks, the bot trades in paper)</h2>
+  <div class="row"><span class="switch" id="pl_sw"><span class="track" id="pl_trk"><span class="knob"></span></span><span id="pl_on">-</span></span>
+   <label>Approval <select id="pl_appr"><option value="auto">automatic</option><option value="ask">ask me</option></select></label>
+   <label>Minimum score <input id="pl_min" type="number" step="0.05" min="0.3" max="0.95" style="width:80px"></label>
+   <button id="pl_save">Save</button><button id="pl_now" class="primary" style="margin-left:auto">Plan now</button></div>
+  <div id="pl_msg" class="mut" style="margin-top:6px"></div>
+  <div id="pl_board" class="small"></div>
+  <div class="wrap" style="margin-top:8px"><table id="pl_table"></table></div>
+  <p class="mut">After each scout check, Grok reads the chart facts the desk computes from Kraken candles and writes one plan per coin, or "no trade". The desk checks every plan with fixed rules: coin list, levels in order, stop no wider than your stop loss, target worth the fees, reward against risk, news verdict, event windows, confidence and conflicts. It never asks another AI. Accepted plans above your minimum score are traded only while the bot is in paper mode, when the price enters the zone, and the bot's own money rules still apply. A plan is "closed" only with the bot's fills, then compared with what was planned.</p></div>
  <div class="card"><h2>Recent decisions (Gate)</h2><div class="wrap"><table id="decisions"></table></div>
   <p class="mut">Every time the model wants to enter, the bot checks the calendar, the fundamentals verdict and your money rules. Each answer is listed here.</p></div>
 </div>
@@ -101,6 +110,8 @@ dialog::backdrop{background:rgba(0,0,0,.5)}
   <div class="wrap" style="max-height:420px;overflow:auto;margin-top:6px"><table id="ptable"></table></div>
   <p class="mut">BTC and ETH always stay: the model reads them as reference markets for every coin, so adding or removing another coin never retrains the rest. A new coin needs enough Kraken history (checked when you apply), trains its own model first, and cannot place a trade, paper or live, until that model is ready. Removing a coin never sells it: an open trade on it is managed to its normal exit. The bot still holds at most <span id="pmot">3</span> trades at a time.</p></div>
  <div class="card"><h2>Model</h2><div id="model" class="mut">-</div></div>
+ <div class="card"><h2>What the model sees now</h2><div class="wrap"><table id="mview"></table></div>
+  <p class="mut">The model's predicted average price change over its look-ahead, for the latest candle. The bot buys only when it is above your buy threshold and the model trusts the candle (it looks like the data it was trained on). With the trend filter on, the daily price must also be above its 50-day average.</p></div>
  <div class="card"><h2>Training data: Kraken candle history</h2><div id="hist" class="mut">-</div>
   <div class="row" style="margin-top:8px"><button id="hdl">Update history</button><span id="hmsg" class="mut"></span></div>
   <p class="mut">The full Kraken history is kept in a database on this server; updating only adds what is new. The bot keeps its saved model between restarts and retrains it in the background on schedule.</p></div>
@@ -251,6 +262,7 @@ async function refresh(){
     (cl.length?cl.map(t=>'<tr><td>'+iso(t.close_date)+'</td><td>'+esc(t.pair)+'</td><td class="n">'+num(t.amount,6)+'</td><td class="n">'+num(t.open_rate,4)+'</td><td class="n">'+num(t.close_rate,4)+
       '</td><td>'+esc(t.exit_reason)+'</td><td class="n '+((t.profit_abs||0)>=0?'ok':'bad')+'">'+signed(t.profit_abs)+' ('+num(t.profit_pct,2)+'%)</td></tr>').join('')
       :'<tr><td colspan="7" class="mut">None yet</td></tr>');
+  renderPlans(s.plans);renderModelView(s.model_view);
   const dc=s.decisions||[];
   $('decisions').innerHTML='<tr><th>Time</th><th>Pair</th><th>Result</th><th>Reason</th></tr>'+
     (dc.length?dc.map(d=>'<tr><td>'+when(d.at)+'</td><td>'+esc(d.pair)+'</td><td class="'+(d.result==='approved'?'ok':'bad')+'">'+esc(d.result)+'</td><td>'+esc(d.reason)+'</td></tr>').join('')
@@ -281,6 +293,53 @@ function renderData(){const dt=window._data;if(!dt)return;
     '<br>Next events: '+((dt.upcoming||[]).map(e=>esc(e.name)+' '+when(e.at)).join(' · ')||'none known');}
 
 // ---------------------------------------------------------------- FreqAI tab
+// ---------------------------------------------------------------- trade plans
+const PL_STATUS={approved:['approved, waiting for the price','ok'],waiting_approval:['waiting for you','warn'],entering:['entry order sent','ok'],
+  open:['open','ok'],closed:['closed','mut'],rejected:['rejected','bad'],verify_more:['needs more evidence','warn'],low_score:['score too low','warn'],
+  no_trade:['no trade','mut'],expired:['expired','mut'],cancelled:['rejected by you','mut'],refused:['bot refused','bad'],not_filled:['not filled','mut'],
+  not_executed_live:['not traded (live)','warn']};
+let plFilled=false;
+function renderPlans(P){
+  if(!P)return;const st=P.settings,sb=P.scoreboard;
+  $('pl_trk').className='track'+(st.enabled?' on':'');$('pl_on').textContent='Trade plans: '+(st.enabled?'ON':'OFF');
+  if(!plFilled){plFilled=true;$('pl_appr').value=st.approval;$('pl_min').value=st.min_score;}
+  const lr=P.last_run;
+  if(!$('pl_msg').dataset.keep)$('pl_msg').innerHTML=(P.running?'<span class="ok">Grok is writing plans now...</span> ':'')+
+    (lr?'Last round '+when(lr.ts)+(lr.ok?' &middot; '+lr.n_plans+' coins':' &middot; <span class="bad">failed: '+esc(lr.error)+'</span>'):'No plan rounds yet. They start after the next scout check, or press Plan now.');
+  const m=sb.measures,h=sb.gate_hindsight;
+  $('pl_board').innerHTML='Last 30 days: <b>'+sb.plans+'</b> plans ('+sb.no_trade+' no-trade answers) &middot; accepted <b>'+sb.accepted+'</b> &middot; needs more '+sb.verify_more+' &middot; rejected '+sb.rejected+
+    ' &middot; traded <b>'+sb.traded+'</b> &middot; closed '+sb.closed+' (won '+sb.wins+')<br>Plan trades <b class="'+(sb.plan_profit_usd>=0?'ok':'bad')+'">'+signed(sb.plan_profit_usd)+' USD</b> &middot; model trades '+signed(sb.model_profit_usd)+' USD ('+sb.model_trades+')'+
+    ' &middot; buy &amp; hold '+(sb.buy_hold_pct==null?'-':signed(sb.buy_hold_pct)+'%')+
+    '<br>Desk checks: signal escapes '+m.signal_escapes+' &middot; closes without fills '+m.false_closes+' &middot; mismatches '+m.mismatches+' &middot; asked you '+m.asked_owner+' &middot; refused by bot '+m.refused+' &middot; not filled '+m.not_filled+
+    ((h.untraded_target_first+h.untraded_stop_first+h.untraded_neither)?'<br>Plans not traded, what happened after: target first '+h.untraded_target_first+', stop first '+h.untraded_stop_first+', neither '+h.untraded_neither+', entry never reached '+h.untraded_entry_never:'');
+  const R=P.recent||[];
+  $('pl_table').innerHTML='<tr><th>#</th><th>Time</th><th>Coin</th><th class="n">Buy zone</th><th class="n">Stop</th><th class="n">Target</th><th class="n">Conf.</th><th class="n">Score</th><th>Status</th><th>Why</th></tr>'+
+    (R.length?R.map(p=>{const s0=PL_STATUS[p.status]||[p.status,'mut'];
+      const why=(p.status==='closed'?(signed(p.profit_abs)+' USD &middot; '+esc((p.review||'').replace(/_/g,' '))+': '+esc(p.review_notes||'')):
+        p.action!=='long'?esc(p.reason||''):esc((p.status_reason?p.status_reason+' &middot; ':'')+(p.gate_reasons||[]).join(' ')));
+      const act=p.status==='waiting_approval'?' <button data-pa="1" data-id="'+p.id+'">Approve</button> <button data-pa="0" data-id="'+p.id+'" class="del">Reject</button>':'';
+      return '<tr><td>'+p.id+'</td><td>'+when(p.created)+'</td><td>'+esc(p.pair)+'</td>'+(p.action==='long'?
+        '<td class="n">'+num(p.entry_low,6)+' - '+num(p.entry_high,6)+'</td><td class="n">'+num(p.stop,6)+'</td><td class="n">'+num(p.target,6)+'</td><td class="n">'+(p.confidence==null?'-':num(p.confidence,2))+'</td><td class="n">'+(p.score==null?'-':num(p.score,2))+'</td>':
+        '<td colspan="5" class="mut">no trade</td>')+'<td class="'+s0[1]+'">'+s0[0]+act+'</td><td class="mut" style="max-width:420px">'+why+'</td></tr>';}).join('')
+     :'<tr><td colspan="10" class="mut">No plans yet.</td></tr>');
+}
+$('pl_table').onclick=async e=>{const b=e.target.closest('button[data-pa]');if(!b)return;
+  const r=await api('plan_decide',{id:+b.dataset.id,approve:b.dataset.pa==='1'});$('pl_msg').dataset.keep=1;
+  $('pl_msg').innerHTML='<span class="'+(r.ok?'ok':'bad')+'">'+esc(r.message||r.error||'')+'</span>';setTimeout(()=>{delete $('pl_msg').dataset.keep;},8000);refresh();};
+$('pl_sw').onclick=async()=>{const on=!$('pl_trk').classList.contains('on');const r=await api('plans_settings',{enabled:on});
+  $('pl_msg').dataset.keep=1;$('pl_msg').innerHTML='<span class="'+(r.ok?'ok':'bad')+'">'+esc(r.ok?('Trade plans turned '+(on?'on':'off')+'.'):r.message)+'</span>';setTimeout(()=>{delete $('pl_msg').dataset.keep;},6000);refresh();};
+$('pl_save').onclick=async()=>{const r=await api('plans_settings',{approval:$('pl_appr').value,min_score:$('pl_min').value});
+  $('pl_msg').dataset.keep=1;$('pl_msg').innerHTML='<span class="'+(r.ok?'ok':'bad')+'">'+esc(r.message||'')+'</span>';setTimeout(()=>{delete $('pl_msg').dataset.keep;},6000);if(r.ok){plFilled=false;}refresh();};
+$('pl_now').onclick=async()=>{const r=await api('plan_now',{});$('pl_msg').dataset.keep=1;
+  $('pl_msg').innerHTML='<span class="'+(r.ok?'ok':'bad')+'">'+esc(r.message||'')+'</span>';setTimeout(()=>{delete $('pl_msg').dataset.keep;},8000);};
+function renderModelView(V){
+  if(!$('mview'))return;V=V||[];
+  $('mview').innerHTML='<tr><th>Coin</th><th class="n">Model expects</th><th class="n">Buy threshold</th><th>Trusted</th><th>Would buy?</th></tr>'+
+    (V.length?V.map(v=>{const buy=v.predicted_pct!=null&&v.trusted&&v.predicted_pct>v.needs_pct;
+      return '<tr><td>'+esc(v.pair)+'</td><td class="n '+((v.predicted_pct||0)>=0?'ok':'bad')+'">'+(v.predicted_pct==null?'-':signed(v.predicted_pct)+'%')+'</td><td class="n">'+num(v.needs_pct,2)+'%</td><td>'+(v.trusted==null?'-':v.trusted?'yes':'no')+'</td><td>'+(buy?'<b class="ok">yes</b>':'no')+'</td></tr>';}).join('')
+     :'<tr><td colspan="5" class="mut">The bot is not answering, or has no prediction yet.</td></tr>');
+}
+
 let stratFilled=false,stratArmed=0;
 function renderStrategy(S){
   if(!S)return;const v=S.settings;
