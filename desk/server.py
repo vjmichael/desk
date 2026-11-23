@@ -11,9 +11,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from . import __version__, connectors, engine as engine_mod, research as research_mod
 from .store import Store, SECRET_FIELDS
 
-UI_PATH = os.path.join(os.path.dirname(__file__), "ui.html")
-PAPER_PATH = os.path.join(os.path.dirname(__file__), "paper.html")
-MAJVAJ_PATH = os.path.join(os.path.dirname(__file__), "majvaj.html")
+APP_PATH = os.path.join(os.path.dirname(__file__), "majvaj.html")  # the whole app: Desk, FreqAI, Scout, Paper, Keys tabs
 MAX_BODY = 64 * 1024
 
 TELEGRAM_BOTS = {
@@ -170,14 +168,8 @@ class Handler(BaseHTTPRequestHandler):
         if not self._host_ok():
             return self._send(403, {"ok": False, "error": "forbidden host"})
         path = self.path.split("?")[0]
-        if path == "/":
-            with open(UI_PATH, "rb") as f:
-                return self._send(200, f.read(), "text/html; charset=utf-8")
-        if path == "/paper":
-            with open(PAPER_PATH, "rb") as f:
-                return self._send(200, f.read(), "text/html; charset=utf-8")
-        if path == "/majvaj":
-            with open(MAJVAJ_PATH, "rb") as f:
+        if path in ("/", "/majvaj"):
+            with open(APP_PATH, "rb") as f:
                 return self._send(200, f.read(), "text/html; charset=utf-8")
         if path == "/api/majvaj/status":
             if not self._authorized():
@@ -186,10 +178,6 @@ class Handler(BaseHTTPRequestHandler):
             if mv is None:
                 return self._send(200, {"ok": False, "error": "Maj Vaj (the Freqtrade bot) is not set up on this machine."})
             return self._send(200, dict(mv.status(), ok=True, version=__version__))
-        if path == "/api/paper/status":
-            if not self._authorized():
-                return self._send(403, {"ok": False, "error": "bad token"})
-            return self._send(200, dict(self.server.engine.status(), ok=True, version=__version__))
         if path == "/api/history/status":
             if not self._authorized():
                 return self._send(403, {"ok": False, "error": "bad token"})
@@ -235,12 +223,10 @@ class Handler(BaseHTTPRequestHandler):
                                                                 "paper first (Maj Vaj page), then delete it."})
             store.update(vals, clear=clear)
             return self._send(200, {"ok": True, "message": "Deleted." if clear and not vals else "Saved."})
-        if path in ("/api/history/download", "/api/history/backtest"):
-            r = self.server.research
-            started = r.download() if path.endswith("download") else r.backtest()
-            return self._send(200, {"ok": started, "message": "Started." if started else "Something is already running."})
-        if path.startswith("/api/paper/"):
-            return self._paper(path[len("/api/paper/"):], body)
+        if path == "/api/history/download":
+            started = self.server.research.download()
+            return self._send(200, {"ok": started, "message": "Updating the candle history from Kraken..." if started
+                                    else "An update is already running."})
         if path.startswith("/api/majvaj/"):
             mv = self.server.majvaj
             if mv is None:
@@ -255,6 +241,10 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send(200, {"ok": True, "message": "Refreshing outside data; this takes up to a minute."})
             if action == "trading":
                 return self._send(200, mv.set_trading(bool(body.get("on")), body.get("confirm")))
+            if action == "backtest":
+                return self._send(200, mv.lab.request(str(body.get("range") or "")))
+            if action == "grok":
+                return self._send(200, mv.save_grok_settings(body))
             if action == "schedule":
                 return self._send(200, mv.save_schedule(body.get("times")))
             if action == "verdict_now":
@@ -283,44 +273,6 @@ class Handler(BaseHTTPRequestHandler):
                 store.update({chat: chat_id})
             return self._send(200, res)
         self._send(404, {"ok": False, "error": "not found"})
-
-
-def _paper_action(self, action, body):
-    eng = self.server.engine
-    if action == "start":
-        ok = eng.start()
-        return {"ok": True, "message": "Paper trading started." if ok else "It was already running."}
-    if action == "stop":
-        ok = eng.stop()
-        return {"ok": True, "message": "Stopped." if ok else "It was not running."}
-    if action == "scout_now":
-        if not eng.request_scout():
-            return {"ok": False, "message": "Press Start first; the scout only runs while the desk is running."}
-        return {"ok": True, "message": "Scout requested. It can take a minute; the page refreshes by itself."}
-    if action == "reset":
-        if eng.running:
-            return {"ok": False, "message": "Stop the desk before resetting the paper account."}
-        try:
-            equity = float(body.get("equity", 1000))
-        except (TypeError, ValueError):
-            equity = 0
-        if not 100 <= equity <= 10_000_000:
-            return {"ok": False, "message": "Starting equity must be between 100 and 10,000,000."}
-        eng.account.reset(equity)
-        eng.last, eng.last_bids = {}, {}
-        eng.errors.clear()
-        engine_mod.save_settings(self.server.store.dir, {})
-        return {"ok": True, "message": "Paper account reset to %.2f USD." % equity}
-    if action == "settings":
-        engine_mod.save_settings(self.server.store.dir, {k: body[k] for k in body if k in
-                                 ("scout_minutes", "cycle_minutes", "max_scout_calls_per_day", "grok_model", "session_scouting", "research")})
-        return {"ok": True, "message": "Settings saved."}
-    return None
-
-
-Handler._paper = lambda self, action, body: (
-    lambda res: self._send(404, {"ok": False, "error": "unknown action"}) if res is None else self._send(200, res)
-)(_paper_action(self, action, body))
 
 
 def serve_in_thread(server):

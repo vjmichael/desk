@@ -26,12 +26,12 @@ def load_token(path):
 
 
 def main():
-    ap = argparse.ArgumentParser(prog="desk", description="Desk: paper trading with Kraken, Grok and Telegram.")
+    ap = argparse.ArgumentParser(prog="desk", description="Maj Vaj Desk: the page, keys, fundamentals and reports for the Freqtrade bot.")
     ap.add_argument("--port", type=int, default=8765)
     ap.add_argument("--data-dir", default="data")
     ap.add_argument("--no-browser", action="store_true")
     ap.add_argument("--token-file", help="keep the access token in this file so it survives restarts (server use)")
-    ap.add_argument("--resume", action="store_true", help="carry on paper trading if it was running before a restart")
+    ap.add_argument("--resume", action="store_true", help="(ignored; kept so older service files still start)")
     ap.add_argument("--majvaj-config", help="Maj Vaj settings file (Freqtrade API, verdict and money files); enables the bot layer if present")
     args = ap.parse_args()
     store = Store(args.data_dir)
@@ -57,17 +57,11 @@ def main():
         except Exception:
             pass
     if majvaj is not None:
-        # Maj Vaj (Freqtrade) is the trading system now; the old Desk paper engine stays off.
+        # The old Desk paper engine is retired: make sure it never starts again after an update.
         try:
             server.engine.account.set_meta("wanted_running", "0")
         except Exception:
             pass
-    elif args.resume:
-        try:
-            if server.engine.resume():
-                print("Resumed paper trading.")
-        except Exception as e:
-            print("Could not resume automatically: %s" % type(e).__name__)
     signal.signal(signal.SIGTERM, lambda *_: (_ for _ in ()).throw(KeyboardInterrupt()))
     try:
         server.serve_forever()
