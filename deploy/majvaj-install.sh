@@ -155,7 +155,6 @@ for u in desk majvaj-freqtrade majvaj-watchdog.timer; do printf '   %-24s %s\n' 
 echo
 echo "Done. If the strategy did not change, the bot reuses its saved model and is up in about a minute."
 echo "If it changed, it trains a new model first (a few minutes). It also needs a fresh Grok verdict"
-echo "before it may open trades. Watch it on the Desk page -> 'Maj Vaj trading bot'."
-echo "Update later by running this same script again."
-echo "Live trading stays locked until its readiness checks pass. To prepare it later (as root):"
-echo "  python3 -m desk.livemode set-passphrase    and    python3 -m desk.livemode set-trade-key   (run in /opt/desk)"
+echo "before it may open trades. Watch it on the Desk page."
+echo "Update later by running this same script again (it fetches its own newest version first)."
+echo "Live trading: add a trade-enabled Kraken key on the Keys tab, then use the switch on the Paper settings tab."

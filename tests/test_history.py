@@ -147,14 +147,7 @@ class ResearchEndpointTests(unittest.TestCase):
             self.assertIn("not reachable", st["job"]["message"])
             code, _ = call(server, "/api/history/status", token=False)
             self.assertEqual(code, 403)
-            _, b = call(server, "/api/history/backtest", {})
-            for _ in range(50):
-                _, b = call(server, "/api/history/status")
-                st = json.loads(b)
-                if not st["job"]["running"]:
-                    break
-                threading.Event().wait(0.1)
-            self.assertIn("No history yet", st["job"]["message"])
+            self.assertEqual(call(server, "/api/history/backtest", {})[0], 404)   # old rules backtest retired
         finally:
             server.shutdown(); server.server_close(); tmp.cleanup()
 
