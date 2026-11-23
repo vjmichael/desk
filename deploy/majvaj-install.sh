@@ -70,7 +70,8 @@ if [ -n "${HEARTBEAT_URL:-}" ]; then
 fi
 [ -f "$UD/config.mode.json" ] || echo '{"dry_run": true, "db_url": "sqlite:////freqtrade/user_data/tradesv3.dryrun.sqlite"}' > "$UD/config.mode.json"
 chown -R 1000:1000 "$UD"; chmod 600 "$UD/config.private.json" "$UD/config.mode.json"
-chown desk:1000 "$MV"; chmod 755 "$MV"
+chown desk:1000 "$MV"; chmod 775 "$MV"   # Desk writes settings and verdicts here; the bot (uid 1000) writes its decision log
+python3 -c "import json,sys; p=sys.argv[1]; c=json.load(open(p)); c['ft_image']=sys.argv[2]; json.dump(c,open(p,'w'),indent=2)" "$CFG" "$DIGEST"
 chown root:desk "$CFG"; chmod 640 "$CFG"
 
 echo "== 5/8 Strategy self-test (money rules, profit protection, fundamentals gate)"

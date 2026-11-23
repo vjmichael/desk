@@ -4,7 +4,7 @@ from datetime import datetime, timedelta, timezone
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "user_data", "strategies"))
 from MajVajFreqAI import (allowance, event_distances, goal_state, in_event_window, ledger, load_money,  # noqa: E402
-                          point_in_time, read_verdict)
+                          log_decision, point_in_time, read_verdict)
 import numpy as np  # noqa: E402
 import pandas as pd  # noqa: E402
 
@@ -88,6 +88,21 @@ class CalendarAndDataTests(unittest.TestCase):
     def test_event_distances(self):
         nxt, prv = event_distances(np.array([3600.0 * 10]), np.array([0.0, 3600.0 * 30]))
         self.assertEqual((nxt[0], prv[0]), (20.0, 10.0))
+
+
+class DecisionLogTests(unittest.TestCase):
+    def test_log_appends_rotates_and_never_raises(self):
+        with tempfile.TemporaryDirectory() as d:
+            p = os.path.join(d, "decisions.jsonl")
+            log_decision(p, "BTC/USD", "rejected", "money rules: daily loss limit", now=1.0)
+            log_decision(p, "ETH/USD", "approved", "approved (fundamentals normal)", now=2.0)
+            rows = [json.loads(x) for x in open(p)]
+            self.assertEqual([r["result"] for r in rows], ["rejected", "approved"])
+            with open(p, "a") as f:
+                f.write("x" * 1_000_100)
+            log_decision(p, "SOL/USD", "rejected", "calendar", now=3.0)
+            self.assertTrue(os.path.exists(p + ".1")); self.assertEqual(len(open(p).readlines()), 1)
+            log_decision(os.path.join(d, "missing-dir", "x.jsonl"), "BTC/USD", "approved", "ok")   # no exception
 
 
 if __name__ == "__main__":
