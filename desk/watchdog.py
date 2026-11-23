@@ -14,7 +14,7 @@ import subprocess
 import sys
 import time
 
-from . import connectors, livemode, net
+from . import connectors, freqailab, livemode, net
 from .ftapi import FreqtradeAPI, FtError
 from .store import Store
 
@@ -238,6 +238,12 @@ def main(config_path="/etc/majvaj/majvaj.json"):
             desk_secrets=os.path.join(desk_dir, "secrets.json"))
     except Exception as e:  # never let a mode problem stop the watchdog
         recovery("Watchdog: mode switch step failed (%s); no change was made." % type(e).__name__)
+    try:
+        state["backtest_last"] = freqailab.tick(os.path.dirname(os.path.dirname(cfg["verdict_file"])), cfg.get("ft_image"),
+                                                os.path.join(cfg.get("desk_data_dir", "/var/lib/desk"), "history.db"),
+                                                now, notify=recovery)
+    except Exception as e:  # a backtest problem must never stop the watchdog
+        recovery("Watchdog: backtest step failed (%s)." % type(e).__name__)
     ping_heartbeat(cfg.get("heartbeat_url"), healthy)
     state["last_run"] = now
     state["last_obs"] = obs

@@ -18,6 +18,7 @@ from .scout import GrokResearch
 from .econdata import EconData
 from .livemode import ModeDesk, WARNING_OFF, WARNING_ON, WARNING_VERSION, PHRASE_LIVE, PHRASE_PAPER, blockers
 from .verdict import VerdictService, write_atomic
+from .freqailab import Lab
 
 GOAL_MODES = ("continue", "stop", "opportunity")
 SESSION_NAMES = ("Asia/Tokyo", "London", "London/New York overlap", "New York", "Quiet (late US)")
@@ -134,6 +135,8 @@ class MajVaj:
                                        settings_fn, self.notifier, clock=clock)
         self.econ = EconData(store.dir, os.path.dirname(self.cfg["verdict_file"]), lambda: store.get("fred_key"))
         self.mode = ModeDesk(store.dir, self.verdicts._meta, clock=clock)
+        self.mv_dir = os.path.dirname(self.cfg["verdict_file"])
+        self.lab = Lab(os.path.dirname(self.mv_dir), clock=clock)
         self.stop_event, self.thread = threading.Event(), None
 
     # ------------------------------------------------------------ mode (paper / live)
@@ -282,17 +285,73 @@ class MajVaj:
             except FtError as e:
                 bot = {"ok": False, "error": str(e)}
         latest = self.verdicts.latest()
+        if latest:
+            latest = dict(latest)
         try:
             with open(self.cfg["verdict_file"], "r", encoding="utf-8") as f:
                 current = json.load(f)
         except (OSError, ValueError):
             current = None
-        return {"bot": bot, "books": books, "money": self.money(), "verdict_file": current,
+        closed = []
+        if bot.get("ok"):
+            try:
+                closed = [{"pair": t.get("pair"), "open_date": t.get("open_date"), "close_date": t.get("close_date"),
+                           "open_rate": t.get("open_rate"), "close_rate": t.get("close_rate"), "amount": t.get("amount"),
+                           "profit_abs": t.get("close_profit_abs"), "profit_pct": t.get("close_profit_pct"),
+                           "exit_reason": t.get("exit_reason")}
+                          for t in sorted(self.closed_trades(), key=lambda t: t.get("close_timestamp") or 0, reverse=True)[:25]]
+            except FtError:
+                pass
+        brief = None
+        if latest:
+            brief = {"ts": latest.get("ts"), "verdict": latest.get("verdict"), "digest": latest.get("digest"),
+                     "sources": json.loads(latest.get("sources") or "[]")}
+        return {"bot": bot, "books": books, "money": self.money(), "verdict_file": current, "closed": closed,
+                "decisions": self.decisions(), "briefing": brief, "grok": self.grok_settings(), "lab": self.lab.status(),
                 "latest_verdict": latest, "verdicts": self.verdicts.history(limit=25), "now": self.clock(),
                 "schedule": self.verdicts.schedule_text(), "next_check": self.verdicts.next_check(),
                 "mode": self.mode_info(bot), "data": self.econ.status(),
                 "control": {"trading_wanted": self.wanted_trading(),
                             "phrases": {"pause": PAUSE_PHRASE, "resume": RESUME_PHRASE}}}
+
+    def decisions(self, limit=30):
+        """The bot's latest entry decisions (approved / rejected and why), newest first."""
+        path = os.path.join(self.mv_dir, "decisions.jsonl")
+        try:
+            with open(path, "rb") as f:
+                f.seek(0, 2)
+                f.seek(max(0, f.tell() - 64 * 1024))
+                lines = f.read().decode("utf-8", "replace").splitlines()
+        except OSError:
+            return []
+        out = []
+        for line in reversed(lines):
+            try:
+                d = json.loads(line)
+            except ValueError:
+                continue
+            if isinstance(d, dict):
+                out.append(d)
+            if len(out) >= limit:
+                break
+        return out
+
+    def grok_settings(self):
+        s = load_settings(self.store.dir)
+        return {"model": s.grok_model, "research": s.research}
+
+    def save_grok_settings(self, body):
+        from .engine import save_settings, MODEL_RE
+        changes = {}
+        if "model" in body:
+            m = str(body.get("model") or "").strip()
+            if not MODEL_RE.match(m):
+                return {"ok": False, "message": "That does not look like a Grok model name (e.g. grok-4.3)."}
+            changes["grok_model"] = m
+        if "research" in body:
+            changes["research"] = bool(body.get("research"))
+        save_settings(self.store.dir, changes)
+        return {"ok": True, "message": "Saved. Used from the next check."}
 
     def save_schedule(self, items):
         if isinstance(items, str):
