@@ -58,6 +58,9 @@ class FreqtradeAPI:
     def trades(self, limit=50):
         return self._call("GET", "/trades?limit=%d" % int(limit))
 
+    def balance(self):
+        return self._call("GET", "/balance")
+
     def pause(self):
         return self._call("POST", "/pause", {})
 
@@ -78,7 +81,18 @@ class FreqtradeAPI:
                 "profit_closed": prof.get("profit_closed_coin"), "trade_count": prof.get("trade_count"),
                 "closed_trades": prof.get("closed_trade_count"), "winning": prof.get("winning_trades"),
                 "losing": prof.get("losing_trades"),
+                "balance": self._balance(cfg.get("stake_currency") or "USD"),
                 "open": [{"pair": t.get("pair"), "amount": t.get("amount"), "open_rate": t.get("open_rate"),
                           "current_rate": t.get("current_rate"), "profit_pct": t.get("profit_pct"),
                           "profit_abs": t.get("profit_abs"), "open_date": t.get("open_date"),
-                          "stake": t.get("stake_amount")} for t in (opened or []) if isinstance(t, dict)]}
+                          "stop": t.get("stop_loss_abs"), "stake": t.get("stake_amount")}
+                         for t in (opened or []) if isinstance(t, dict)]}
+
+    def _balance(self, stake):
+        """Equity (everything the bot holds, valued in USD) and cash (USD not in trades). None if unavailable."""
+        try:
+            b = self.balance()
+        except FtError:
+            return None
+        cash = next((c.get("free") for c in (b.get("currencies") or []) if c.get("currency") == stake), None)
+        return {"equity": b.get("total_bot", b.get("total")), "cash": cash, "currency": stake}
