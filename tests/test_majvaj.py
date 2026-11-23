@@ -281,3 +281,29 @@ class WatchdogTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TradingStatusTests(unittest.TestCase):
+    def test_on_and_every_reason_for_off(self):
+        T = 1_800_000_000.0
+        bot = {"ok": True, "state": "running"}
+        good = {"verdict": "normal", "expires": T + 3600}
+        books = {"bankroll": 1000, "active": 1000, "today_net": 0, "money": {"daily_loss_limit_pct": 3, "daily_goal_usd": 0}}
+        st = MV.trading_status(bot, True, good, T, "paper", None, books)
+        self.assertTrue(st["on"]); self.assertEqual(st["why"], [])
+        cases = [
+            (({"ok": False}, True, good, T, "paper", None, books), "not answering"),
+            ((bot, False, good, T, "paper", None, books), "you paused"),
+            (({"ok": True, "state": "paused"}, True, good, T, "paper", None, books), "bot is paused"),
+            ((bot, True, None, T, "paper", None, books), "no news verdict"),
+            ((bot, True, dict(good, expires=T - 1), T, "paper", None, books), "expired"),
+            ((bot, True, dict(good, verdict="stand_down"), T, "paper", None, books), "STAND DOWN"),
+            ((bot, True, good, T, "live_exit_only", None, books), "returning to paper"),
+            ((bot, True, good, T, "paper", ("CPI", T + 600), books), "CPI window"),
+            ((bot, True, good, T, "paper", None, dict(books, today_net=-31)), "loss limit"),
+        ]
+        for args, word in cases:
+            st = MV.trading_status(*args)
+            self.assertFalse(st["on"], word); self.assertTrue(any(word in w for w in st["why"]), (word, st))
+        st = MV.trading_status(bot, True, dict(good, verdict="caution"), T, "live", None, books, ["SOL/USD"])
+        self.assertTrue(st["on"]); self.assertEqual(len(st["notes"]), 2)

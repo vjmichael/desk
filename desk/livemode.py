@@ -5,7 +5,7 @@ only the trade-enabled Kraken key (saved on the Keys page), the full warning ack
 phrase. The readiness checks (paper days, closed trades, Grok reliability, watchdog) are shown as advice,
 not as a lock.
 
-Desk only records the confirmed request. The root-side applier (run by the watchdog every 2 minutes)
+Desk only records the confirmed request. The root-side applier (started within seconds by a path unit; the 2-minute watchdog round is the fallback)
 performs the switch. Returning to paper stops new real entries at once and keeps managing open real trades
 ("live-exit-only") until they are closed; only then does the bot go back to paper. Paper and live keep
 separate trade databases. Nothing here closes positions or moves money."""
@@ -134,7 +134,7 @@ class ModeDesk:
         _write(self.request_file, {"to": "live", "at": now, "warning_version": WARNING_VERSION, "scope": scope}, 0o644)
         self._audit({"decision": "live_confirmed", "warning_version": WARNING_VERSION, "scope": scope,
                      "advice_not_met": list(advice_failed)})
-        return {"ok": True, "message": "Confirmed. The bot switches to LIVE within 2 minutes."}
+        return {"ok": True, "message": "Confirmed. The bot restarts on LIVE now; it is back in about a minute."}
 
 
 # ------------------------------------------------------------------ root side (watchdog)

@@ -29,6 +29,9 @@ input,select{font:inherit;padding:5px 7px;border:1px solid var(--line);border-ra
 input{width:110px}#msg{min-height:1.3em;margin:0 0 8px}
 .badge{display:inline-block;padding:1px 9px;border-radius:10px;font-size:12px;border:1px solid var(--line)}
 .big{font-size:17px;font-weight:600}
+.tstat{display:inline-block;padding:4px 14px;border-radius:14px;font-weight:700;font-size:15px;letter-spacing:.3px;color:#fff;background:var(--mut)}
+.tstat.on{background:#0a7d33}.tstat.off{background:#b3261e}
+#tradewhy{margin:-4px 0 10px;font-size:14px}
 .brief{font-size:14px;line-height:1.55;max-height:75vh;overflow:auto}.brief p{margin:0 0 10px}
 .switch{display:inline-flex;align-items:center;gap:10px;cursor:pointer;font-weight:600}
 .track{width:52px;height:28px;border-radius:14px;background:#b3261e;position:relative;transition:.2s;flex:none}
@@ -47,7 +50,8 @@ dialog::backdrop{background:rgba(0,0,0,.5)}
 .form label{display:block;margin:6px 0 2px;font-size:14px}.form input{width:100%}
 .sub{font-size:13px;color:var(--mut);margin:0 0 8px}
 </style></head><body><main>
-<div class="top"><h1>Maj Vaj</h1><span id="mode" class="badge">...</span><span id="botline" class="mut"></span><span class="mut" style="margin-left:auto" id="ver"></span></div>
+<div class="top"><h1>Maj Vaj</h1><span id="mode" class="badge">...</span><span id="trading" class="tstat">TRADING: ...</span><span id="botline" class="mut"></span><span class="mut" style="margin-left:auto" id="ver"></span></div>
+<div id="tradewhy" class="mut"></div>
 <nav class="tabs" id="tabs">
  <button data-t="desk" class="on">Desk</button><button data-t="freqai">FreqAI</button><button data-t="scout">Scout settings</button>
  <button data-t="paper">Paper settings</button><button data-t="keys" id="tab-keys">Keys</button></nav>
@@ -205,6 +209,10 @@ async function refresh(){
     $('equity').textContent=money(bal.equity);$('cash').textContent=money(bal.cash);
     $('pnl').textContent=signed(b.profit_all);$('pnl').className=(b.profit_all||0)>=0?'ok':'bad';
   }else{$('mode').textContent='bot not answering';$('mode').className='badge bad';$('botline').textContent=b.error;$('botline').className='bad';}
+  const tr=s.trading;
+  if(tr){$('trading').textContent='TRADING: '+(tr.on?'ON':'OFF');$('trading').className='tstat '+(tr.on?'on':'off');
+    $('tradewhy').innerHTML=(tr.on?'<span class="ok">The bot may open new trades.</span>':'<span class="bad"><b>No new trades:</b> '+esc(tr.why.join('; '))+'.</span>')+
+      (tr.notes.length?' <span class="warn">'+esc(tr.notes.join('; '))+'.</span>':'')+(tr.on?'':' <span class="mut">Open trades are still managed.</span>');}
   const k=s.books;
   if(k){$('bankroll').textContent=money(k.bankroll);$('active').textContent=money(k.active);$('protected').textContent=money(k.protected);
     $('today').textContent=signed(k.today_net);}

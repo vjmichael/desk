@@ -120,6 +120,45 @@ def evaluate_verdicts(verdicts, candles_by_pair, now):
     return out
 
 
+def trading_status(bot, wanted, verdict, now, mode, event, books, untrained=()):
+    """Is the bot allowed to open new trades right now, and if not, every reason why. Open trades are always managed."""
+    off, notes = [], []
+    if not bot.get("ok"):
+        off.append("the bot is not answering")
+    if mode == "live_exit_only":
+        off.append("returning to paper: only closing the open live trades")
+    if not wanted:
+        off.append("you paused trading")
+    elif bot.get("ok") and bot.get("state") != "running":
+        off.append("the bot is paused (being switched back on)")
+    if not verdict:
+        off.append("no news verdict yet")
+    elif now >= float(verdict.get("expires") or 0):
+        off.append("the news verdict expired")
+    elif verdict.get("verdict") == "stand_down":
+        off.append("news verdict: STAND DOWN")
+    elif verdict.get("verdict") == "caution":
+        notes.append("half-size trades (CAUTION)")
+    if event:
+        off.append("%s window: no new trades until %s" % (event[0], time.strftime("%H:%M UTC", time.gmtime(event[1] + 90 * 60))))
+    if books:
+        m = books.get("money") or {}
+        if books.get("active", 1) <= 0:
+            off.append("no active bankroll left")
+        lim = m.get("daily_loss_limit_pct") or 0
+        if lim and books.get("today_net", 0) <= -books.get("bankroll", 0) * lim / 100:
+            off.append("daily loss limit reached")
+        goal = m.get("daily_goal_usd") or 0
+        if goal and books.get("today_net", 0) >= goal:
+            if m.get("goal_mode") == "stop":
+                off.append("daily goal reached")
+            elif m.get("goal_mode") == "opportunity":
+                notes.append("goal reached: careful extra trades only")
+    if untrained:
+        notes.append("not yet on %s (model training)" % ", ".join(untrained))
+    return {"on": not off, "why": off, "notes": notes}
+
+
 class MajVaj:
     def __init__(self, store, config_path, notifier=None, ft=None, market=None, clock=time.time):
         with open(config_path, "r", encoding="utf-8") as f:
@@ -331,12 +370,20 @@ class MajVaj:
         if latest:
             brief = {"ts": latest.get("ts"), "verdict": latest.get("verdict"), "digest": latest.get("digest"),
                      "sources": json.loads(latest.get("sources") or "[]")}
+        pst = self.pairs.status([t.get("pair") for t in (bot.get("open") or [])] if bot.get("ok") else ())
+        try:
+            event = self.econ.event_window()
+        except Exception:
+            event = None
+        trading = trading_status(bot, self.wanted_trading(), current, self.clock(), self.mode.state().get("mode"), event,
+                                 books, pst["untrained"])
         return {"bot": bot, "books": books, "money": self.money(), "verdict_file": current, "closed": closed,
+                "trading": trading,
                 "decisions": self.decisions(), "briefing": brief, "grok": self.grok_settings(), "lab": self.lab.status(),
                 "latest_verdict": latest, "verdicts": self.verdicts.history(limit=25), "now": self.clock(),
                 "schedule": self.verdicts.schedule_text(), "next_check": self.verdicts.next_check(),
                 "mode": self.mode_info(bot), "data": self.econ.status(),
-                "pairs": self.pairs.status([t.get("pair") for t in (bot.get("open") or [])] if bot.get("ok") else ()),
+                "pairs": pst,
                 "control": {"trading_wanted": self.wanted_trading(),
                             "phrases": {"pause": PAUSE_PHRASE, "resume": RESUME_PHRASE}}}
 

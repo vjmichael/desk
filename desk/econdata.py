@@ -228,6 +228,14 @@ class EconData:
             return self.db.execute("SELECT period, value, MIN(available_at) FROM observations WHERE series=? "
                                    "GROUP BY period ORDER BY period", (series,)).fetchall()
 
+    def event_window(self, now=None, before_min=60, after_min=90):
+        """(name, at) of a high-impact event whose no-new-trades window covers now, else None (same rule as the bot)."""
+        now = self.clock() if now is None else now
+        with self.lock:
+            r = self.db.execute("SELECT name, at FROM events WHERE at BETWEEN ? AND ? ORDER BY at LIMIT 1",
+                                (now - after_min * 60, now + before_min * 60)).fetchone()
+        return (r[0], r[1]) if r else None
+
     def status(self):
         with self.lock:
             f = [dict(zip(("source", "ok", "at", "rows", "message"), r)) for r in self.db.execute("SELECT * FROM fetches")]
